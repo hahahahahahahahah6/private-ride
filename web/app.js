@@ -1,3 +1,18 @@
+/* URL 免登：链接形如 /driver.html#token=xxx 或 ?token=xxx，打开即登录（家人试用期用，长效 30 天） */
+(function bootstrapTokenFromUrl() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const h = new URLSearchParams(location.hash.slice(1));
+    const token = h.get("token") || q.get("token");
+    if (token) {
+      localStorage.setItem("pr_token", token);
+      q.delete("token");
+      const qs = q.toString();
+      history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
+    }
+  } catch { /* ignore */ }
+})();
+
 /* private-ride 网页版：与 FastAPI 后端同源（/web/），API 直接走相对路径 */
 const api = {
   async req(path, options = {}) {

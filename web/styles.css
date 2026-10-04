@@ -146,7 +146,7 @@ input:focus, textarea:focus, select:focus {
 .row > * { margin-bottom: 14px; min-width: 0; }
 .hint { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .hint:empty { display: none; }
-#book-msg:not(:empty) { color: var(--green); }
+.hint.ok { color: var(--green); }
 .empty {
   text-align: center; color: var(--faint); font-size: 14px; line-height: 1.8;
   background: var(--card); border-radius: var(--radius);

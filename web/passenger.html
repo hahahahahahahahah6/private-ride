@@ -88,7 +88,7 @@
     const msg = $("book-msg");
     const pickup_text = $("pickup").value.trim();
     const dropoff_text = $("dropoff").value.trim();
-    if (!pickup_text || !dropoff_text) { msg.textContent = "请填写上车和下车地点"; return; }
+    if (!pickup_text || !dropoff_text) { msg.classList.remove("ok"); msg.textContent = "请填写上车和下车地点"; return; }
     const when = $("when").value;
     try {
       await api.createRide({
@@ -97,10 +97,11 @@
         note: $("note").value.trim(),
         scheduled_at: when ? new Date(when).toISOString() : null,
       });
+      msg.classList.add("ok");
       msg.textContent = "✓ 下单成功，等待司机接单";
       $("pickup").value = $("dropoff").value = $("note").value = "";
       refresh();
-    } catch (e) { msg.textContent = e.message; }
+    } catch (e) { msg.classList.remove("ok"); msg.textContent = e.message; }
   };
 
   ensureSession($("login"), $("main"), () => refresh());
