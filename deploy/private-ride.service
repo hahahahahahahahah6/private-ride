@@ -1,0 +1,17 @@
+[Unit]
+Description=private-ride API (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+# 按实际路径修改下面三行：
+User=hatch
+WorkingDirectory=/home/hatch/workspace/private-ride/backend
+EnvironmentFile=/home/hatch/workspace/private-ride/backend/.env
+ExecStart=/home/hatch/workspace/private-ride/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+# 验证码存进程内存，SQLite 小圈子用单 worker 避免跨进程失效；切 Postgres + DB 存码后可调大
+
+[Install]
+WantedBy=multi-user.target

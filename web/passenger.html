@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>乘客 · 私人专车</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>乘客约车</h1>
+    <span><a href="index.html">切换身份</a> · <a href="#" onclick="logout();return false;">退出</a></span>
+  </div>
+
+  <div id="login"></div>
+
+  <div id="main" style="display:none">
+    <div class="card">
+      <h3>叫车</h3>
+      <input id="pickup" placeholder="上车地点" />
+      <input id="dropoff" placeholder="下车地点" />
+      <div class="row">
+        <input id="seats" type="number" min="1" max="20" value="1" style="flex:1" />
+        <input id="when" type="datetime-local" style="flex:2;margin-left:8px" />
+      </div>
+      <input id="note" placeholder="备注（可选，如：有大件行李）" />
+      <button class="primary" id="btn-book">叫车</button>
+      <p class="hint" id="book-msg"></p>
+    </div>
+
+    <h3>我的订单</h3>
+    <div id="rides"></div>
+  </div>
+</div>
+<script src="app.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  async function refresh() {
+    try {
+      const rides = await api.myRides();
+      $("rides").innerHTML = rides.length
+        ? rides.map((r) => {
+            const canCancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status);
+            return rideCard(r, canCancel
+              ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消订单</button>` : "");
+          }).join("")
+        : '<p class="hint">还没有订单</p>';
+    } catch (e) { $("rides").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+  }
+
+  async function cancelRide(id) {
+    if (!confirm("确定取消这单吗？")) return;
+    try { await api.cancelRide(id); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+
+  $("btn-book").onclick = async () => {
+    const msg = $("book-msg");
+    const pickup_text = $("pickup").value.trim();
+    const dropoff_text = $("dropoff").value.trim();
+    if (!pickup_text || !dropoff_text) { msg.textContent = "请填写上车和下车地点"; return; }
+    const when = $("when").value;
+    try {
+      await api.createRide({
+        pickup_text, dropoff_text,
+        seats_needed: parseInt($("seats").value) || 1,
+        note: $("note").value.trim(),
+        scheduled_at: when ? new Date(when).toISOString() : null,
+      });
+      msg.textContent = "下单成功，等待司机接单";
+      $("pickup").value = $("dropoff").value = $("note").value = "";
+      refresh();
+    } catch (e) { msg.textContent = e.message; }
+  };
+
+  ensureSession($("login"), $("main"), () => refresh());
+  setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
+</script>
+</body>
+</html>

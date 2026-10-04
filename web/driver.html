@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>司机 · 私人专车</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>司机接单</h1>
+    <span><a href="index.html">切换身份</a> · <a href="#" onclick="logout();return false;">退出</a></span>
+  </div>
+
+  <div id="login"></div>
+
+  <div id="main" style="display:none">
+    <h3>待接订单</h3>
+    <div id="open"></div>
+    <h3>我的行程</h3>
+    <div id="mine"></div>
+  </div>
+</div>
+<script src="app.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  async function refresh() {
+    try {
+      const open = await api.openRides();
+      $("open").innerHTML = open.length
+        ? open.map((r) => rideCard(r,
+            `<button class="small primary" style="width:auto" onclick="acceptRide('${r.id}')">接单</button>`)).join("")
+        : '<p class="hint">暂无待接订单</p>';
+    } catch (e) { $("open").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+
+    try {
+      const mine = (await api.myRides()).filter((r) => !["completed", "cancelled"].includes(r.status));
+      $("mine").innerHTML = mine.length
+        ? mine.map((r) => {
+            const next = NEXT_STATUS[r.status];
+            const btns = next
+              ? `<button class="small primary" style="width:auto" onclick="advanceRide('${r.id}','${next[0]}')">${next[1]}</button>` : "";
+            return rideCard(r, btns +
+              (["requested", "accepted", "en_route", "arrived"].includes(r.status)
+                ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消</button>` : ""));
+          }).join("")
+        : '<p class="hint">暂无进行中的行程</p>';
+    } catch (e) { $("mine").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+  }
+
+  async function acceptRide(id) {
+    try { await api.acceptRide(id); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+  async function advanceRide(id, status) {
+    try { await api.setStatus(id, status); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+  async function cancelRide(id) {
+    if (!confirm("确定取消这单吗？")) return;
+    try { await api.cancelRide(id); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+
+  ensureSession($("login"), $("main"), () => refresh());
+  setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
+</script>
+</body>
+</html>

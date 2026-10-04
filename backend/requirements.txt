@@ -1,0 +1,11 @@
+# 生产依赖（版本已锁定，2026-10-03 实测可用）
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.3
+pydantic==2.13.5
+
+# 切 Postgres/Neon 时取消注释：
+# psycopg[binary]==3.2.12
+
+# 仅开发/测试用（生产不装）：
+# pytest==9.1.1
