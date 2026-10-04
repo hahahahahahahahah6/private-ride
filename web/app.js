@@ -74,7 +74,7 @@ function esc(s) {
 /* 登录小组件：挂到 #login 容器上，成功后调 onOk(user) */
 function mountLogin(el, onOk) {
   el.innerHTML = `
-    <div class="card">
+    <div class="card login-card">
       <div class="card_h">手机号登录</div>
       <input id="login-phone" inputmode="tel" placeholder="手机号，如 +16265550100" />
       <div class="row">

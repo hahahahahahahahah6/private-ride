@@ -2,15 +2,18 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>乘客 · 私人专车</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 <div class="wrap">
   <div class="topbar">
-    <h1>🧍 乘客约车</h1>
-    <span><a href="index.html">切换身份</a> · <a href="#" onclick="logout();return false;">退出</a></span>
+    <div class="brand">
+      <span class="mark">🧍</span>
+      <h1>乘客约车<em>PASSENGER</em></h1>
+    </div>
+    <span class="links"><a href="index.html">切换身份</a><a href="#" onclick="logout();return false;">退出</a></span>
   </div>
 
   <div id="login"></div>
@@ -28,13 +31,13 @@
           <input id="seats" type="number" min="1" max="20" value="1" />
         </div>
         <div style="flex:2">
-          <label class="f" for="when">用车时间（不填=现在）</label>
+          <label class="f" for="when">用车时间</label>
           <input id="when" type="datetime-local" />
         </div>
       </div>
       <label class="f" for="note">备注（可选）</label>
       <input id="note" placeholder="如：有大件行李、带小孩" />
-      <button class="primary" id="btn-book">叫车</button>
+      <button class="primary pulse" id="btn-book">叫车</button>
       <p class="hint" id="book-msg"></p>
     </div>
 
@@ -46,6 +49,20 @@
 <script>
   const $ = (id) => document.getElementById(id);
 
+  function rideCard2(r, actionsHtml = "") {
+    const when = r.scheduled_at
+      ? new Date(r.scheduled_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "现在用车";
+    return `<div class="card">
+      <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
+      <span class="time">${when}</span></div>
+      <div class="route"><span class="route-line"></span><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
+      <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
+      <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
+      ${actionsHtml}
+    </div>`;
+  }
+
   async function refresh() {
     try {
       const rides = await api.myRides();
@@ -55,9 +72,9 @@
             const canCancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status);
             const actions = canCancel
               ? `<div class="actions"><button class="small danger" onclick="cancelRide('${r.id}')">取消订单</button></div>` : "";
-            return rideCard(r, actions);
+            return rideCard2(r, actions);
           }).join("")
-        : '<div class="empty">还没有订单<br />在上面填好地点就可以叫车了</div>';
+        : '<div class="empty"><span class="big">🚗</span>还没有订单<br />在上面填好地点，一键叫车</div>';
     } catch (e) { $("rides").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
   }
 
@@ -80,7 +97,7 @@
         note: $("note").value.trim(),
         scheduled_at: when ? new Date(when).toISOString() : null,
       });
-      msg.textContent = "下单成功，等待司机接单";
+      msg.textContent = "✓ 下单成功，等待司机接单";
       $("pickup").value = $("dropoff").value = $("note").value = "";
       refresh();
     } catch (e) { msg.textContent = e.message; }
