@@ -9,7 +9,7 @@
 <body>
 <div class="wrap">
   <div class="topbar">
-    <h1>乘客约车</h1>
+    <h1>🧍 乘客约车</h1>
     <span><a href="index.html">切换身份</a> · <a href="#" onclick="logout();return false;">退出</a></span>
   </div>
 
@@ -17,19 +17,28 @@
 
   <div id="main" style="display:none">
     <div class="card">
-      <h3>叫车</h3>
-      <input id="pickup" placeholder="上车地点" />
-      <input id="dropoff" placeholder="下车地点" />
+      <div class="card_h">叫车</div>
+      <label class="f" for="pickup">上车地点</label>
+      <input id="pickup" placeholder="例如：家里小区门口" />
+      <label class="f" for="dropoff">下车地点</label>
+      <input id="dropoff" placeholder="例如：罗兰岗大华超市" />
       <div class="row">
-        <input id="seats" type="number" min="1" max="20" value="1" style="flex:1" />
-        <input id="when" type="datetime-local" style="flex:2;margin-left:8px" />
+        <div style="flex:1">
+          <label class="f" for="seats">人数</label>
+          <input id="seats" type="number" min="1" max="20" value="1" />
+        </div>
+        <div style="flex:2">
+          <label class="f" for="when">用车时间（不填=现在）</label>
+          <input id="when" type="datetime-local" />
+        </div>
       </div>
-      <input id="note" placeholder="备注（可选，如：有大件行李）" />
+      <label class="f" for="note">备注（可选）</label>
+      <input id="note" placeholder="如：有大件行李、带小孩" />
       <button class="primary" id="btn-book">叫车</button>
       <p class="hint" id="book-msg"></p>
     </div>
 
-    <h3>我的订单</h3>
+    <div class="sec"><h3>我的订单</h3><span class="count" id="rides-count"></span></div>
     <div id="rides"></div>
   </div>
 </div>
@@ -40,13 +49,15 @@
   async function refresh() {
     try {
       const rides = await api.myRides();
+      $("rides-count").textContent = rides.length ? `共 ${rides.length} 单` : "";
       $("rides").innerHTML = rides.length
         ? rides.map((r) => {
             const canCancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status);
-            return rideCard(r, canCancel
-              ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消订单</button>` : "");
+            const actions = canCancel
+              ? `<div class="actions"><button class="small danger" onclick="cancelRide('${r.id}')">取消订单</button></div>` : "";
+            return rideCard(r, actions);
           }).join("")
-        : '<p class="hint">还没有订单</p>';
+        : '<div class="empty">还没有订单<br />在上面填好地点就可以叫车了</div>';
     } catch (e) { $("rides").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
   }
 

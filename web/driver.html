@@ -9,16 +9,16 @@
 <body>
 <div class="wrap">
   <div class="topbar">
-    <h1>司机接单</h1>
+    <h1>🚙 司机接单</h1>
     <span><a href="index.html">切换身份</a> · <a href="#" onclick="logout();return false;">退出</a></span>
   </div>
 
   <div id="login"></div>
 
   <div id="main" style="display:none">
-    <h3>待接订单</h3>
+    <div class="sec"><h3>待接订单</h3><span class="count" id="open-count"></span></div>
     <div id="open"></div>
-    <h3>我的行程</h3>
+    <div class="sec"><h3>我的行程</h3><span class="count" id="mine-count"></span></div>
     <div id="mine"></div>
   </div>
 </div>
@@ -29,24 +29,26 @@
   async function refresh() {
     try {
       const open = await api.openRides();
+      $("open-count").textContent = open.length ? `${open.length} 单待接` : "";
       $("open").innerHTML = open.length
         ? open.map((r) => rideCard(r,
-            `<button class="small primary" style="width:auto" onclick="acceptRide('${r.id}')">接单</button>`)).join("")
-        : '<p class="hint">暂无待接订单</p>';
+            `<div class="actions"><button class="small primary go" onclick="acceptRide('${r.id}')">接单</button></div>`)).join("")
+        : '<div class="empty">暂无待接订单</div>';
     } catch (e) { $("open").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
 
     try {
       const mine = (await api.myRides()).filter((r) => !["completed", "cancelled"].includes(r.status));
+      $("mine-count").textContent = mine.length ? `${mine.length} 单进行中` : "";
       $("mine").innerHTML = mine.length
         ? mine.map((r) => {
             const next = NEXT_STATUS[r.status];
             const btns = next
-              ? `<button class="small primary" style="width:auto" onclick="advanceRide('${r.id}','${next[0]}')">${next[1]}</button>` : "";
-            return rideCard(r, btns +
-              (["requested", "accepted", "en_route", "arrived"].includes(r.status)
-                ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消</button>` : ""));
+              ? `<button class="small primary" onclick="advanceRide('${r.id}','${next[0]}')">${next[1]}</button>` : "";
+            const cancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status)
+              ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消</button>` : "";
+            return rideCard(r, `<div class="actions">${btns}${cancel}</div>`);
           }).join("")
-        : '<p class="hint">暂无进行中的行程</p>';
+        : '<div class="empty">暂无进行中的行程</div>';
     } catch (e) { $("mine").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
   }
 

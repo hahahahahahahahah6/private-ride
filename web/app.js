@@ -46,14 +46,22 @@ const NEXT_STATUS = {
   in_progress: ["completed", "完成行程"],
 };
 
+function badgeClass(status) {
+  if (status === "requested") return "badge b-requested";
+  if (status === "cancelled") return "badge b-cancel";
+  if (status === "completed") return "badge b-done";
+  return "badge b-active";
+}
+
 function rideCard(r, actionsHtml = "") {
   const when = r.scheduled_at
-    ? new Date(r.scheduled_at).toLocaleString("zh-CN")
+    ? new Date(r.scheduled_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "现在用车";
   return `<div class="card">
-    <div class="card-head"><span class="badge">${STATUS_LABEL[r.status] || r.status}</span>
+    <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
     <span class="time">${when}</span></div>
-    <div class="route">${esc(r.pickup_text)} → ${esc(r.dropoff_text)}</div>
+    <div class="route"><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
+    <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
     <div class="meta">${r.seats_needed} 人${r.note ? " · " + esc(r.note) : ""}</div>
     ${actionsHtml}
   </div>`;
@@ -67,7 +75,7 @@ function esc(s) {
 function mountLogin(el, onOk) {
   el.innerHTML = `
     <div class="card">
-      <h3>手机号登录</h3>
+      <div class="card_h">手机号登录</div>
       <input id="login-phone" inputmode="tel" placeholder="手机号，如 +16265550100" />
       <div class="row">
         <input id="login-code" inputmode="numeric" placeholder="验证码" style="flex:1" />
