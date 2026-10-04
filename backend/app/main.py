@@ -102,8 +102,8 @@ class RoleIn(BaseModel):
 
 @app.patch("/users/{user_id}/role", response_model=UserOut)
 def set_user_role(user_id: uuid.UUID, payload: RoleIn,
+                  _admin: User = Depends(auth.require_admin),
                   db: Session = Depends(get_db)) -> User:
-    # v0.1: seed 接口暂不鉴权，生产需改成 admin 校验
     if payload.role not in ("passenger", "driver", "admin"):
         raise HTTPException(status_code=400, detail="role 非法")
     user = db.get(User, user_id)

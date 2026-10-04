@@ -79,4 +79,19 @@ def notify_drivers_of_new_ride(db, ride) -> dict:
     errors = [t for t in tickets if t.get("status") != "ok"]
     if errors:
         log.warning("expo push partial failure: %s", errors)
-    return {"sent": ok, "skipped": len(tokens) - ok, "errors": errors}
+
+    # 清理死 token：Expo 明确说设备已注销（通常是卸载 App），
+    # 就把该司机的 push_token 置空，下次不再打扰 Expo。
+    # tickets 与发送的 tokens 顺序一一对应，可 zip。
+    dead = 0
+    for tok, ticket in zip(tokens, tickets):
+        details = ticket.get("details") or {}
+        if ticket.get("status") != "ok" and details.get("error") == "DeviceNotRegistered":
+            user = next((d for d in drivers if d.push_token == tok), None)
+            if user is not None:
+                user.push_token = None
+                dead += 1
+    if dead:
+        db.commit()
+        log.info("cleared %d dead push tokens", dead)
+    return {"sent": ok, "skipped": len(tokens) - ok, "errors": errors, "dead_cleared": dead}

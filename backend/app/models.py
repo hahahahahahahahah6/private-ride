@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -44,7 +44,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(64), default="")
     role: Mapped[str] = mapped_column(String(16), default="passenger")  # passenger|driver|admin
     push_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Driver(Base):
@@ -70,8 +70,8 @@ class Ride(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # requested → accepted → en_route → arrived → in_progress → completed | cancelled
     status: Mapped[str] = mapped_column(String(16), default="requested", index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class AuthToken(Base):
