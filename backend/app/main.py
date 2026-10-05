@@ -1,6 +1,7 @@
 """private-ride backend: auth + users + rides + web static hosting."""
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from .schemas import (
 )
 
 app = FastAPI(title="private-ride API", version="0.1.0")
+
+log = logging.getLogger(__name__)
 
 # 里程计价：起步价 + 每英里单价（分）。调价只改这里。
 MILEAGE_BASE_CENTS = 800   # $8 起步
@@ -179,6 +182,7 @@ def create_ride(payload: RideCreate, user: User = Depends(get_current_user),
         price_miles=miles,
         price_final_cents=final_cents,
         price_status="agreed" if final_cents is not None else "pending",
+        pay_mode=payload.pay_mode,
     )
     db.add(ride)
     db.commit()
@@ -316,6 +320,12 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
     ride.status = payload.status
     db.commit()
     db.refresh(ride)
+    # 行程完成：线上付款自动扣款（失败不阻塞）
+    if payload.status == "completed":
+        try:
+            _try_charge_ride(db, ride)
+        except Exception:
+            pass
     # 邮件通知乘客：失败不影响状态流转
     try:
         from . import notify as notify_mod
@@ -353,6 +363,76 @@ def cancel_ride(ride_id: uuid.UUID, user: User = Depends(get_current_user),
     except Exception:
         pass
     return _ride_out(ride, db, user)
+
+
+# ---------- 付款（Stripe 线上 / 线下当面） ----------
+
+@app.get("/pay/config")
+def pay_config() -> dict:
+    from . import stripe_pay as sp
+    return {"publishable_key": sp.publishable_key(), "configured": sp._configured()}
+
+
+@app.post("/pay/setup-intent")
+def pay_setup_intent(user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)) -> dict:
+    """绑卡第一步：拿 client_secret 给前端 Stripe.js 确认卡片。"""
+    from . import stripe_pay as sp
+    try:
+        customer_id = sp.ensure_customer(user.stripe_customer_id, user.email)
+        if user.stripe_customer_id != customer_id:
+            user.stripe_customer_id = customer_id
+            db.commit()
+        client_secret = sp.create_setup_intent(customer_id)
+        return {"client_secret": client_secret}
+    except sp.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+class AttachCardIn(BaseModel):
+    payment_method_id: str
+
+
+@app.post("/pay/attach")
+def pay_attach(payload: AttachCardIn, user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)) -> dict:
+    """绑卡第二步：前端 Stripe.js 确认成功后，把卡存到用户名下。"""
+    from . import stripe_pay as sp
+    try:
+        info = sp.get_payment_method(payload.payment_method_id)
+        user.stripe_pm_id = payload.payment_method_id
+        user.card_brand = info["brand"]
+        user.card_last4 = info["last4"]
+        if not user.stripe_customer_id:
+            user.stripe_customer_id = sp.ensure_customer(None, user.email)
+        db.commit()
+        return {"ok": True, "brand": info["brand"], "last4": info["last4"]}
+    except sp.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+def _try_charge_ride(db: Session, ride: Ride) -> None:
+    """行程完成时线上扣款。失败只记日志，不阻塞完成状态。"""
+    if ride.pay_mode != "online" or ride.price_final_cents is None:
+        return
+    from . import stripe_pay as sp
+    passenger = db.get(User, ride.passenger_id)
+    if not passenger or not passenger.stripe_pm_id or not passenger.stripe_customer_id:
+        log.warning("ride %s online pay but no card bound", ride.id)
+        return
+    try:
+        pi = sp.charge(
+            passenger.stripe_customer_id, passenger.stripe_pm_id,
+            ride.price_final_cents,
+            f"私人专车 {ride.pickup_text} → {ride.dropoff_text}",
+        )
+        ride.stripe_pi_id = pi.get("id")
+        ride.pay_status = "paid" if pi.get("status") == "succeeded" else "failed"
+        db.commit()
+    except Exception as e:
+        log.warning("stripe charge failed for ride %s: %s", ride.id, e)
+        ride.pay_status = "failed"
+        db.commit()
 
 
 # ---------- web static (mount last so API routes win) ----------

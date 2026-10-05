@@ -55,6 +55,19 @@
       <div id="price-quote-wrap" style="display:none">
         <p class="hint">司机接单后会报价，你再确认。</p>
       </div>
+      <label class="f">付款方式</label>
+      <div class="row" style="gap:8px;margin-bottom:10px">
+        <button type="button" class="secondary small pay-mode" data-mode="offline" style="flex:1">线下当面付</button>
+        <button type="button" class="secondary small pay-mode" data-mode="online" style="flex:1">线上付款</button>
+      </div>
+      <div id="card-wrap" style="display:none">
+        <div id="card-info" class="hint"></div>
+        <div id="card-form" style="display:none">
+          <div id="card-element" style="padding:12px;background:var(--card);border-radius:12px;margin-bottom:8px"></div>
+          <button type="button" class="secondary small" id="btn-bind-card">绑定这张卡</button>
+          <p class="hint" id="bind-msg"></p>
+        </div>
+      </div>
       <button class="primary pulse" id="btn-book">叫车</button>
       <p class="hint" id="book-msg"></p>
     </div>
@@ -64,8 +77,67 @@
   </div>
 </div>
 <script src="app.js?v=20261004c"></script>
+<script src="https://js.stripe.com/v3/"></script>
 <script>
   const $ = (id) => document.getElementById(id);
+
+  // ---- 付款方式 ----
+  let payMode = "offline";
+  let stripe = null, cardEl = null, stripePk = "";
+  document.querySelectorAll(".pay-mode").forEach((b) => {
+    b.onclick = async () => {
+      payMode = b.dataset.mode;
+      document.querySelectorAll(".pay-mode").forEach((x) =>
+        x.classList.toggle("primary", x === b));
+      $("card-wrap").style.display = payMode === "online" ? "" : "none";
+      if (payMode === "online") await initCard();
+    };
+  });
+  document.querySelector('.pay-mode[data-mode="offline"]').classList.add("primary");
+
+  async function initCard() {
+    try {
+      const cfg = await api.req("/pay/config");
+      stripePk = cfg.publishable_key;
+      if (!cfg.configured || !stripePk) {
+        $("card-info").textContent = "线上付款暂未开通，请选择线下当面付";
+        return;
+      }
+      const me = await api.me();
+      if (me.card_last4) {
+        $("card-info").textContent = `已绑卡：${me.card_brand || ""} ****${me.card_last4}`;
+        $("card-form").style.display = "none";
+      } else {
+        $("card-info").textContent = "还未绑卡，请添加一张卡用于线上付款";
+        $("card-form").style.display = "";
+        if (!stripe) {
+          stripe = Stripe(stripePk);
+          const elements = stripe.elements();
+          cardEl = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
+          cardEl.mount("#card-element");
+        }
+      }
+    } catch (e) { $("card-info").textContent = e.message; }
+  }
+
+  $("btn-bind-card").onclick = async () => {
+    const msg = $("bind-msg");
+    msg.textContent = "绑定中…";
+    try {
+      const { client_secret } = await api.req("/pay/setup-intent", { method: "POST" });
+      const { setupIntent, error } = await stripe.confirmCardSetup(client_secret, {
+        payment_method: { card: cardEl },
+      });
+      if (error) throw new Error(error.message);
+      const r = await api.req("/pay/attach", {
+        method: "POST",
+        body: JSON.stringify({ payment_method_id: setupIntent.payment_method }),
+      });
+      msg.textContent = `✓ 已绑定 ${r.brand} ****${r.last4}`;
+      $("card-form").style.display = "none";
+      $("card-info").textContent = `已绑卡：${r.brand} ****${r.last4}`;
+    } catch (e) { msg.textContent = e.message; }
+  };
 
   // 价格方式切换
   let priceMode = "offer";
@@ -116,6 +188,7 @@
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
+      <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${actionsHtml}
       ${quoteHtml}
     </div>`;
@@ -154,6 +227,7 @@
       note: $("note").value.trim(),
       scheduled_at: when ? new Date(when).toISOString() : null,
       price_mode: priceMode,
+      pay_mode: payMode,
     };
     if (priceMode === "offer") {
       const dollars = parseFloat($("price-offer").value);

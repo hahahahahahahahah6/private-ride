@@ -45,6 +45,11 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(64), default="")
     role: Mapped[str] = mapped_column(String(16), default="passenger")  # passenger|driver|admin
     push_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Stripe 绑卡（线上付款用）
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    stripe_pm_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    card_last4: Mapped[str | None] = mapped_column(String(4), nullable=True, default=None)
+    card_brand: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -79,6 +84,11 @@ class Ride(Base):
     price_final_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # pending=待确认 / agreed=已确认 / rejected=已拒绝
     price_status: Mapped[str] = mapped_column(String(16), default="pending")
+    # 付款：online=线上 / offline=线下当面付
+    pay_mode: Mapped[str] = mapped_column(String(16), default="offline")
+    # unpaid=未付 / paid=已付 / failed=失败
+    pay_status: Mapped[str] = mapped_column(String(16), default="unpaid")
+    stripe_pi_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

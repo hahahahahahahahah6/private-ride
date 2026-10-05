@@ -62,6 +62,12 @@ function priceLabel(r) {
   }
   return "";
 }
+function payLabel(r) {
+  const mode = r.pay_mode === "online" ? "线上付款" : "线下当面付";
+  if (r.pay_mode === "offline") return mode;
+  const st = r.pay_status === "paid" ? "已扣款" : r.pay_status === "failed" ? "扣款失败" : "待扣款";
+  return `${mode} · ${st}`;
+}
 
 const STATUS_LABEL = {
   requested: "待接单",

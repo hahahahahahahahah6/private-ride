@@ -40,6 +40,7 @@
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
+      <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${r.passenger_contact ? `<div class="meta">📞 乘客：${esc(r.passenger_contact)}</div>` : ""}
       ${actionsHtml}
     </div>`;

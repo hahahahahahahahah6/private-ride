@@ -21,6 +21,9 @@ class UserOut(BaseModel):
     email: str | None = None
     name: str
     role: str
+    # 绑卡信息（只返回品牌和后四位）
+    card_brand: str | None = None
+    card_last4: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -76,6 +79,8 @@ class RideCreate(BaseModel):
     price_mode: str = Field(default="offer", pattern="^(offer|mileage|quote)$")
     price_offer_cents: int | None = Field(default=None, ge=0)
     price_miles: float | None = Field(default=None, ge=0)
+    # 付款：online=线上扣款 / offline=线下当面付
+    pay_mode: str = Field(default="offline", pattern="^(online|offline)$")
 
 
 class QuoteIn(BaseModel):
@@ -110,5 +115,8 @@ class RideOut(BaseModel):
     price_quote_cents: int | None = None
     price_final_cents: int | None = None
     price_status: str = "pending"
+    # 付款
+    pay_mode: str = "offline"
+    pay_status: str = "unpaid"
 
     model_config = {"from_attributes": True}
