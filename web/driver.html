@@ -18,6 +18,18 @@
 
   <div id="login"></div>
 
+  <div id="invite" style="display:none">
+    <div class="card">
+      <div class="card_h">司机邀请码</div>
+      <p class="hint">你是乘客身份。输入司机邀请码即可成为司机、查看并接受订单。</p>
+      <div class="row">
+        <input id="invite-code" placeholder="8 位邀请码" style="flex:1;text-transform:uppercase" maxlength="8" />
+        <button class="secondary" id="btn-redeem">兑换</button>
+      </div>
+      <p class="hint" id="invite-msg"></p>
+    </div>
+  </div>
+
   <div id="main" style="display:none">
     <div class="sec"><h3>待接订单</h3><span class="count" id="open-count"></span></div>
     <div id="open"></div>
@@ -28,6 +40,17 @@
 <script src="app.js?v=20261004c"></script>
 <script>
   const $ = (id) => document.getElementById(id);
+
+  // 乘客联系方式里提取电话号码，生成可拨打链接
+  function contactLinks(contact) {
+    const m = contact.match(/\+?[\d][\d\s\-()]{6,}/);
+    const safe = esc(contact);
+    if (m) {
+      const tel = m[0].replace(/[\s\-()]/g, "");
+      return `<a href="tel:${tel}">${safe}</a>`;
+    }
+    return safe;
+  }
 
   function rideCard2(r, actionsHtml = "") {
     const when = r.scheduled_at
@@ -41,7 +64,8 @@
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
-      ${r.passenger_contact ? `<div class="meta">📞 乘客：${esc(r.passenger_contact)}</div>` : ""}
+      ${r.passenger_contact ? `<div class="meta">📞 乘客：${contactLinks(r.passenger_contact)}</div>` : ""}
+      <div class="meta">🗺️ <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.pickup_text)}" target="_blank">导航到上车点</a></div>
       ${actionsHtml}
     </div>`;
   }
@@ -104,7 +128,36 @@
     catch (e) { alert(e.message); }
   }
 
-  ensureSession($("login"), $("main"), () => refresh());
+  $("btn-redeem").onclick = async () => {
+    const code = $("invite-code").value.trim();
+    const msg = $("invite-msg");
+    if (!code) { msg.textContent = "请输入邀请码"; return; }
+    try {
+      await api.req("/invites/redeem", {
+        method: "POST", body: JSON.stringify({ code }),
+      });
+      msg.textContent = "✓ 已成为司机";
+      setTimeout(() => location.reload(), 800);
+    } catch (e) { msg.textContent = e.message; }
+  };
+
+  async function checkRoleAndShow() {
+    try {
+      const me = await api.me();
+      if (me.role === "driver" || me.role === "admin") {
+        $("invite").style.display = "none";
+        $("main").style.display = "";
+        refresh();
+      } else {
+        $("main").style.display = "none";
+        $("invite").style.display = "";
+      }
+    } catch (e) {
+      $("invite").style.display = "none";
+    }
+  }
+
+  ensureSession($("login"), $("main"), () => checkRoleAndShow());
   setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
 </script>
 </body>

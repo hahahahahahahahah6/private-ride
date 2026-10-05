@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from . import auth
 from .auth import get_current_user, require_driver
 from .database import get_db, init_db
-from .models import Ride, User
+from .models import InviteCode, Ride, User
 from .schemas import (
     PushTokenIn,
     QuoteConfirmIn,
@@ -91,7 +92,9 @@ def set_push_token(payload: PushTokenIn, user: User = Depends(get_current_user),
 # ---------- users (admin/seed 用；App 内走 /auth) ----------
 
 @app.post("/users", response_model=UserOut, status_code=201)
-def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
+def create_user(payload: UserCreate,
+                _admin: User = Depends(auth.require_admin),
+                db: Session = Depends(get_db)) -> User:
     if db.query(User).filter_by(phone=payload.phone).first():
         raise HTTPException(status_code=409, detail="phone already registered")
     user = User(phone=payload.phone, name=payload.name, role=payload.role)
@@ -102,7 +105,9 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
 
 
 @app.get("/users/{user_id}", response_model=UserOut)
-def get_user(user_id: uuid.UUID, db: Session = Depends(get_db)) -> User:
+def get_user(user_id: uuid.UUID,
+             _admin: User = Depends(auth.require_admin),
+             db: Session = Depends(get_db)) -> User:
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
@@ -142,11 +147,15 @@ def _passenger_contact(db: Session, ride: Ride) -> str | None:
 
 def _ride_out(ride: Ride, db: Session, viewer: User | None = None) -> Ride:
     # 乘客联系方式只给相关人看：乘客本人、接单司机、管理员
-    # 待接单列表里不暴露，避免被所有司机看到
-    if viewer is not None and (
-        viewer.role == "admin"
-        or ride.passenger_id == viewer.id
-        or ride.driver_id == viewer.id
+    # 待接单列表里不暴露；已完成/已取消的订单不再显示（隐私）
+    if (
+        viewer is not None
+        and ride.status not in ("completed", "cancelled")
+        and (
+            viewer.role == "admin"
+            or ride.passenger_id == viewer.id
+            or ride.driver_id == viewer.id
+        )
     ):
         ride.passenger_contact = _passenger_contact(db, ride)
     else:
@@ -194,6 +203,17 @@ def create_ride(payload: RideCreate, user: User = Depends(get_current_user),
         push_mod.notify_drivers_of_new_ride(db, ride)
     except Exception:
         pass
+    # 邮件通知司机有新单
+    try:
+        from . import notify as notify_mod
+
+        notify_mod.notify_driver_new_ride(
+            ride.pickup_text, ride.dropoff_text,
+            f"${(ride.price_final_cents or 0) / 100:.2f}" if ride.price_final_cents else "待定",
+            None,
+        )
+    except Exception:
+        pass
     return _ride_out(ride, db, user)
 
 
@@ -217,6 +237,20 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
 def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
                 db: Session = Depends(get_db)) -> Ride:
+    # 时间冲突：司机已有进行中的单时拒绝接新单（一个司机一次只跑一单）
+    active = (
+        db.query(Ride)
+        .filter(
+            Ride.driver_id == driver.id,
+            Ride.status.notin_(["completed", "cancelled"]),
+        )
+        .first()
+    )
+    if active is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"您还有一单进行中（{active.pickup_text}→{active.dropoff_text}），完成后才能接新单",
+        )
     # 原子抢单：只有 status=requested 的才能被更新，防止两人同时抢到
     rows = (
         db.query(Ride)
@@ -393,6 +427,14 @@ class AttachCardIn(BaseModel):
     payment_method_id: str
 
 
+class InviteCreateOut(BaseModel):
+    code: str
+
+
+class InviteRedeemIn(BaseModel):
+    code: str
+
+
 @app.post("/pay/attach")
 def pay_attach(payload: AttachCardIn, user: User = Depends(get_current_user),
                db: Session = Depends(get_db)) -> dict:
@@ -433,6 +475,63 @@ def _try_charge_ride(db: Session, ride: Ride) -> None:
         log.warning("stripe charge failed for ride %s: %s", ride.id, e)
         ride.pay_status = "failed"
         db.commit()
+
+
+# ---------- 司机邀请码 ----------
+
+_redeem_attempts: dict[str, list[float]] = {}
+
+
+def _new_invite_code() -> str:
+    import secrets
+    import string
+    alphabet = string.ascii_uppercase + string.digits
+    # 去掉易混淆的 0/O/1/I
+    alphabet = alphabet.replace("0", "").replace("O", "").replace("1", "").replace("I", "")
+    return "".join(secrets.choice(alphabet) for _ in range(8))
+
+
+@app.post("/invites", response_model=InviteCreateOut)
+def create_invite(admin: User = Depends(auth.require_admin),
+                  db: Session = Depends(get_db)) -> dict:
+    """管理员生成司机邀请码。"""
+    for _ in range(5):
+        code = _new_invite_code()
+        if db.get(InviteCode, code) is None:
+            db.add(InviteCode(code=code, role="driver", created_by=admin.id))
+            db.commit()
+            return {"code": code}
+    raise HTTPException(status_code=500, detail="生成失败，请重试")
+
+
+@app.post("/invites/redeem", response_model=UserOut)
+def redeem_invite(payload: InviteRedeemIn,
+                  user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)) -> User:
+    """用邀请码升级为司机。防暴力猜：每用户每小时最多 10 次。"""
+    import time
+
+    now = time.time()
+    key = f"redeem:{user.id}"
+    attempts = _redeem_attempts.get(key, [])
+    attempts = [t for t in attempts if now - t < 3600]
+    if len(attempts) >= 10:
+        raise HTTPException(status_code=429, detail="尝试太频繁，请一小时后再试")
+    attempts.append(now)
+    _redeem_attempts[key] = attempts
+
+    code = payload.code.strip().upper()
+    inv = db.get(InviteCode, code)
+    if inv is None:
+        raise HTTPException(status_code=404, detail="邀请码不存在")
+    if inv.used_by is not None:
+        raise HTTPException(status_code=409, detail="邀请码已被使用")
+    inv.used_by = user.id
+    inv.used_at = datetime.now(timezone.utc)
+    user.role = inv.role
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 # ---------- web static (mount last so API routes win) ----------

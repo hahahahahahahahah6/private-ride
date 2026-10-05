@@ -99,3 +99,14 @@ class AuthToken(Base):
     token: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+
+    code: Mapped[str] = mapped_column(String(16), primary_key=True)
+    role: Mapped[str] = mapped_column(String(16), default="driver")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    used_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

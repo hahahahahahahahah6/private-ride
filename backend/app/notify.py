@@ -62,3 +62,23 @@ def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff
         _send(to_email, f"私人专车：{subject}", bodies[status])
     except Exception as e:
         log.warning("notify email failed: %s", e)
+
+
+def notify_driver_new_ride(pickup: str, dropoff: str, price_label: str,
+                           passenger_contact: str | None) -> None:
+    """新订单邮件通知司机（DRIVER_NOTIFY_EMAIL）。"""
+    to_email = os.getenv("DRIVER_NOTIFY_EMAIL", "")
+    if not to_email:
+        return
+    try:
+        _send(
+            to_email,
+            "私人专车：有新订单",
+            f"有新的叫车订单，请打开司机端查看接单。\n\n"
+            f"上车：{pickup}\n下车：{dropoff}\n"
+            f"价格：{price_label}\n"
+            f"乘客联系：{passenger_contact or '（接单后可见）'}\n\n"
+            f"https://ride.haocoach.com/web/driver.html",
+        )
+    except Exception as e:
+        log.warning("driver notify failed: %s", e)
