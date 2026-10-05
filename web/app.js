@@ -28,10 +28,10 @@ const api = {
     if (!res.ok) throw new Error(body.detail || ("请求失败 " + res.status));
     return body;
   },
-  requestCode: (phone) =>
-    api.req("/auth/request-code", { method: "POST", body: JSON.stringify({ phone }) }),
-  verify: (phone, code) =>
-    api.req("/auth/verify", { method: "POST", body: JSON.stringify({ phone, code }) }),
+  requestCode: (phone, email) =>
+    api.req("/auth/request-code", { method: "POST", body: JSON.stringify(phone ? { phone } : { email }) }),
+  verify: (phone, email, code) =>
+    api.req("/auth/verify", { method: "POST", body: JSON.stringify(phone ? { phone, code } : { email, code }) }),
   me: () => api.req("/me"),
   createRide: (data) =>
     api.req("/rides", { method: "POST", body: JSON.stringify(data) }),
@@ -88,10 +88,14 @@ function esc(s) {
 
 /* 登录小组件：挂到 #login 容器上，成功后调 onOk(user) */
 function mountLogin(el, onOk) {
+  let mode = "phone"; // phone | email
   el.innerHTML = `
     <div class="card login-card">
-      <div class="card_h">手机号登录</div>
-      <input id="login-phone" inputmode="tel" placeholder="手机号，如 +16265550100" />
+      <div class="row" style="gap:8px;margin-bottom:8px">
+        <button id="tab-phone" class="secondary" style="flex:1">手机号登录</button>
+        <button id="tab-email" class="secondary" style="flex:1">邮箱登录</button>
+      </div>
+      <input id="login-ident" inputmode="tel" placeholder="手机号，如 6268660555" />
       <div class="row">
         <input id="login-code" inputmode="numeric" placeholder="验证码" style="flex:1" />
         <button id="btn-code" class="secondary">获取验证码</button>
@@ -100,19 +104,33 @@ function mountLogin(el, onOk) {
       <p class="hint" id="login-msg"></p>
     </div>`;
   const msg = (t) => (el.querySelector("#login-msg").textContent = t);
+  const identInput = () => el.querySelector("#login-ident");
+  const setMode = (m) => {
+    mode = m;
+    identInput().value = "";
+    identInput().placeholder = m === "phone" ? "手机号，如 6268660555" : "邮箱，如 you@gmail.com";
+    identInput().inputmode = m === "phone" ? "tel" : "email";
+    el.querySelector("#tab-phone").classList.toggle("primary", m === "phone");
+    el.querySelector("#tab-email").classList.toggle("primary", m === "email");
+    msg("");
+  };
+  el.querySelector("#tab-phone").onclick = () => setMode("phone");
+  el.querySelector("#tab-email").onclick = () => setMode("email");
+  setMode("phone");
+  const ident = () => identInput().value.trim();
   el.querySelector("#btn-code").onclick = async () => {
-    const phone = el.querySelector("#login-phone").value.trim();
-    if (!phone) return msg("请先填手机号");
+    const v = ident();
+    if (!v) return msg(mode === "phone" ? "请先填手机号" : "请先填邮箱");
     try {
-      const r = await api.requestCode(phone);
+      const r = await api.requestCode(mode === "phone" ? v : null, mode === "email" ? v : null);
       msg(r.dev_code ? `开发模式验证码：${r.dev_code}` : "验证码已发送");
     } catch (e) { msg(e.message); }
   };
   el.querySelector("#btn-login").onclick = async () => {
-    const phone = el.querySelector("#login-phone").value.trim();
+    const v = ident();
     const code = el.querySelector("#login-code").value.trim();
     try {
-      const r = await api.verify(phone, code);
+      const r = await api.verify(mode === "phone" ? v : null, mode === "email" ? v : null, code);
       localStorage.setItem("pr_token", r.token);
       onOk(r.user);
     } catch (e) { msg(e.message); }

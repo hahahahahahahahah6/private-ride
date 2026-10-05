@@ -1,0 +1,13 @@
+[Unit]
+Description=TCP relay: 127.0.0.1:17844 -> Cloudflare edge 198.41.192.37:7844 via egress proxy
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/hatch/.config/egress-proxy/env
+ExecStart=/usr/bin/python3 /home/hatch/workspace/private-ride/deploy/edge-relay.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

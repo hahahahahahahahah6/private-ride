@@ -41,6 +41,7 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     phone: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, default=None)
     name: Mapped[str] = mapped_column(String(64), default="")
     role: Mapped[str] = mapped_column(String(16), default="passenger")  # passenger|driver|admin
     push_token: Mapped[str | None] = mapped_column(String(128), nullable=True)

@@ -53,12 +53,12 @@ def root() -> RedirectResponse:
 
 @app.post("/auth/request-code")
 def request_code(payload: RequestCodeIn) -> dict:
-    return auth.request_code(payload.phone)
+    return auth.request_code(phone=payload.phone, email=payload.email)
 
 
 @app.post("/auth/verify", response_model=TokenOut)
 def verify(payload: VerifyIn, db: Session = Depends(get_db)) -> dict:
-    user, token = auth.verify_code(payload.phone, payload.code, db)
+    user, token = auth.verify_code(phone=payload.phone, email=payload.email, code=payload.code, db=db)
     return {"token": token, "user": user}
 
 

@@ -18,6 +18,7 @@ class UserCreate(BaseModel):
 class UserOut(BaseModel):
     id: uuid.UUID
     phone: str
+    email: str | None = None
     name: str
     role: str
 
@@ -27,11 +28,13 @@ class UserOut(BaseModel):
 # ---------- auth ----------
 
 class RequestCodeIn(BaseModel):
-    phone: str = Field(min_length=7, max_length=32)
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: str | None = Field(default=None, min_length=5, max_length=128)
 
 
 class VerifyIn(BaseModel):
-    phone: str = Field(min_length=7, max_length=32)
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: str | None = Field(default=None, min_length=5, max_length=128)
     code: str = Field(min_length=4, max_length=8)
 
 

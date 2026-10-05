@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare tunnel (ride.haocoach.com) via local edge relay
+After=network.target edge-relay.service
+Wants=edge-relay.service
+
+[Service]
+Type=simple
+EnvironmentFile=/home/hatch/.config/cloudflare/tunnel-env
+ExecStart=/usr/local/bin/cloudflared tunnel --edge 127.0.0.1:17844 --config /home/hatch/.cloudflared/config.yml run --token ${TUNNEL_TOKEN}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
