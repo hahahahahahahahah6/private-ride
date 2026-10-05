@@ -86,32 +86,57 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-/* 登录小组件：挂到 #login 容器上，成功后调 onOk(user) */
+/* 登录小组件：黑金沉浸式全屏，挂到 #login 容器上，成功后调 onOk(user) */
 function mountLogin(el, onOk) {
   let mode = "phone"; // phone | email
+  el.classList.add("pr-auth");
   el.innerHTML = `
-    <div class="card login-card">
-      <div class="row" style="gap:8px;margin-bottom:8px">
-        <button id="tab-phone" class="secondary" style="flex:1">手机号登录</button>
-        <button id="tab-email" class="secondary" style="flex:1">邮箱登录</button>
-      </div>
-      <input id="login-ident" inputmode="tel" placeholder="手机号，如 6268660555" />
-      <div class="row">
-        <input id="login-code" inputmode="numeric" placeholder="验证码" style="flex:1" />
-        <button id="btn-code" class="secondary">获取验证码</button>
-      </div>
-      <button id="btn-login" class="primary">登录</button>
-      <p class="hint" id="login-msg"></p>
+    <div class="pr-screen">
+      <header class="pr-brand">
+        <div class="pr-brand-badge" aria-hidden="true">🚕</div>
+        <h1 class="pr-brand-name">私人专车</h1>
+        <p class="pr-brand-en">PRIVATE RIDE</p>
+      </header>
+      <section class="pr-card" aria-label="登录">
+        <div class="pr-tabs" role="tablist" data-mode="phone" id="pr-tabs">
+          <button class="pr-tab" id="tab-phone" role="tab" aria-selected="true" data-mode="phone">手机号登录</button>
+          <button class="pr-tab" id="tab-email" role="tab" aria-selected="false" data-mode="email">邮箱登录</button>
+          <span class="pr-tab-ink" aria-hidden="true"></span>
+        </div>
+        <label class="pr-field">
+          <input id="login-ident" type="tel" inputmode="numeric" autocomplete="tel" placeholder="手机号，如 6268660555" aria-label="手机号" />
+        </label>
+        <div class="pr-code-row">
+          <label class="pr-field">
+            <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="验证码" aria-label="验证码" />
+          </label>
+          <button class="pr-btn-code" id="btn-code" type="button">获取验证码</button>
+        </div>
+        <p class="pr-msg" id="login-msg" aria-live="polite"></p>
+        <button class="pr-btn-login" id="btn-login" type="button">登录</button>
+      </section>
+      <footer class="pr-slogan">每一程，皆从容</footer>
     </div>`;
   const msg = (t) => (el.querySelector("#login-msg").textContent = t);
   const identInput = () => el.querySelector("#login-ident");
+  const tabs = () => el.querySelector("#pr-tabs");
+  const modes = {
+    phone: { ph: "手机号，如 6268660555", type: "tel", im: "numeric", ac: "tel", label: "手机号" },
+    email: { ph: "邮箱，如 you@gmail.com", type: "email", im: "email", ac: "email", label: "邮箱" },
+  };
   const setMode = (m) => {
     mode = m;
-    identInput().value = "";
-    identInput().placeholder = m === "phone" ? "手机号，如 6268660555" : "邮箱，如 you@gmail.com";
-    identInput().inputmode = m === "phone" ? "tel" : "email";
-    el.querySelector("#tab-phone").classList.toggle("primary", m === "phone");
-    el.querySelector("#tab-email").classList.toggle("primary", m === "email");
+    const cfg = modes[m];
+    tabs().dataset.mode = m;
+    el.querySelectorAll(".pr-tab").forEach((t) =>
+      t.setAttribute("aria-selected", t.dataset.mode === m));
+    const inp = identInput();
+    inp.value = "";
+    inp.type = cfg.type;
+    inp.inputMode = cfg.im;
+    inp.autocomplete = cfg.ac;
+    inp.placeholder = cfg.ph;
+    inp.setAttribute("aria-label", cfg.label);
     msg("");
   };
   el.querySelector("#tab-phone").onclick = () => setMode("phone");
