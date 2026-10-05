@@ -228,7 +228,9 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
         return [_ride_out(r, db, user) for r in q.filter_by(status="requested").all()]
     if mine:
         if user.role in ("driver", "admin"):
-            q = q.filter(Ride.driver_id == user.id)
+            # 司机视角：按预约时间正序（临近的在前），无预约时间的沉底
+            q = q.filter(Ride.driver_id == user.id).order_by(
+                None).order_by(Ride.scheduled_at.is_(None), Ride.scheduled_at.asc())
         else:
             q = q.filter(Ride.passenger_id == user.id)
     return [_ride_out(r, db, user) for r in q.all()]
@@ -237,20 +239,42 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
 def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
                 db: Session = Depends(get_db)) -> Ride:
-    # 时间冲突：司机已有进行中的单时拒绝接新单（一个司机一次只跑一单）
-    active = (
+    # 先取到这单，判断时间冲突
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if ride.status != "requested":
+        raise HTTPException(status_code=409, detail="订单已被接走")
+
+    # 时间冲突检查：只拦真正撞时间的，不拦预约排队
+    # - 都有预约时间：前后 90 分钟内算冲突
+    # - 新单是即时单（无预约时间）：司机正在路上（en_route/arrived/in_progress）时不接
+    others = (
         db.query(Ride)
         .filter(
             Ride.driver_id == driver.id,
-            Ride.status.notin_(["completed", "cancelled"]),
+            Ride.status.in_(["accepted", "en_route", "arrived", "in_progress"]),
+            Ride.id != ride_id,
         )
-        .first()
+        .all()
     )
-    if active is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"您还有一单进行中（{active.pickup_text}→{active.dropoff_text}），完成后才能接新单",
-        )
+    if ride.scheduled_at is not None:
+        for o in others:
+            if o.scheduled_at is None:
+                continue
+            delta = abs((ride.scheduled_at - o.scheduled_at).total_seconds())
+            if delta < 90 * 60:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"时间冲突：您已接了 {o.scheduled_at.strftime('%m-%d %H:%M')} 的单（{o.pickup_text}→{o.dropoff_text}）",
+                )
+    else:
+        busy = [o for o in others if o.status in ("en_route", "arrived", "in_progress")]
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail="您正在服务另一单，请完成后再接即时单",
+            )
     # 原子抢单：只有 status=requested 的才能被更新，防止两人同时抢到
     rows = (
         db.query(Ride)
@@ -351,6 +375,22 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
             status_code=400,
             detail=f"不能从 {ride.status} 直接到 {payload.status}",
         )
+    # 出发前检查：同一时间只能有一单在路上（en_route/arrived/in_progress）
+    if payload.status == "en_route":
+        other_active = (
+            db.query(Ride)
+            .filter(
+                Ride.driver_id == driver.id,
+                Ride.id != ride.id,
+                Ride.status.in_(["en_route", "arrived", "in_progress"]),
+            )
+            .first()
+        )
+        if other_active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"您还有一单正在进行（{other_active.pickup_text}→{other_active.dropoff_text}），请先完成",
+            )
     ride.status = payload.status
     db.commit()
     db.refresh(ride)
