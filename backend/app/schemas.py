@@ -89,5 +89,7 @@ class RideOut(BaseModel):
     status: str
     scheduled_at: datetime | None
     created_at: datetime
+    # 乘客联系方式：仅乘客本人、接单司机、管理员可见
+    passenger_contact: str | None = None
 
     model_config = {"from_attributes": True}

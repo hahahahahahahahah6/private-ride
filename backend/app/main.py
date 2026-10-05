@@ -117,7 +117,27 @@ def set_user_role(user_id: uuid.UUID, payload: RoleIn,
 
 # ---------- rides ----------
 
-def _ride_out(ride: Ride) -> Ride:
+def _passenger_contact(db: Session, ride: Ride) -> str | None:
+    passenger = db.get(User, ride.passenger_id)
+    if passenger is None:
+        return None
+    phone = passenger.phone if not passenger.phone.startswith("email:") else None
+    if passenger.email:
+        return f"{phone} / {passenger.email}" if phone else passenger.email
+    return phone
+
+
+def _ride_out(ride: Ride, db: Session, viewer: User | None = None) -> Ride:
+    # 乘客联系方式只给相关人看：乘客本人、接单司机、管理员
+    # 待接单列表里不暴露，避免被所有司机看到
+    if viewer is not None and (
+        viewer.role == "admin"
+        or ride.passenger_id == viewer.id
+        or ride.driver_id == viewer.id
+    ):
+        ride.passenger_contact = _passenger_contact(db, ride)
+    else:
+        ride.passenger_contact = None
     return ride
 
 
@@ -142,7 +162,7 @@ def create_ride(payload: RideCreate, user: User = Depends(get_current_user),
         push_mod.notify_drivers_of_new_ride(db, ride)
     except Exception:
         pass
-    return _ride_out(ride)
+    return _ride_out(ride, db, user)
 
 
 @app.get("/rides", response_model=list[RideOut])
@@ -153,13 +173,13 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
     if open:
         if user.role not in ("driver", "admin"):
             raise HTTPException(status_code=403, detail="仅司机可查看待接单")
-        return [_ride_out(r) for r in q.filter_by(status="requested").all()]
+        return [_ride_out(r, db, user) for r in q.filter_by(status="requested").all()]
     if mine:
         if user.role in ("driver", "admin"):
             q = q.filter(Ride.driver_id == user.id)
         else:
             q = q.filter(Ride.passenger_id == user.id)
-    return [_ride_out(r) for r in q.all()]
+    return [_ride_out(r, db, user) for r in q.all()]
 
 
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
@@ -175,7 +195,17 @@ def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
     db.commit()
     if rows == 0:
         raise HTTPException(status_code=409, detail="该订单已被接走或不存在")
-    return _ride_out(db.get(Ride, ride_id))
+    ride = db.get(Ride, ride_id)
+    # 邮件通知乘客：失败不影响接单
+    try:
+        from . import notify as notify_mod
+        passenger = db.get(User, ride.passenger_id)
+        notify_mod.notify_status_change(
+            passenger.email if passenger else None,
+            "accepted", ride.pickup_text, ride.dropoff_text)
+    except Exception:
+        pass
+    return _ride_out(ride, db, driver)
 
 
 @app.post("/rides/{ride_id}/status", response_model=RideOut)
@@ -195,7 +225,16 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
     ride.status = payload.status
     db.commit()
     db.refresh(ride)
-    return _ride_out(ride)
+    # 邮件通知乘客：失败不影响状态流转
+    try:
+        from . import notify as notify_mod
+        passenger = db.get(User, ride.passenger_id)
+        notify_mod.notify_status_change(
+            passenger.email if passenger else None,
+            payload.status, ride.pickup_text, ride.dropoff_text)
+    except Exception:
+        pass
+    return _ride_out(ride, db, driver)
 
 
 @app.post("/rides/{ride_id}/cancel", response_model=RideOut)
@@ -213,7 +252,16 @@ def cancel_ride(ride_id: uuid.UUID, user: User = Depends(get_current_user),
     ride.status = "cancelled"
     db.commit()
     db.refresh(ride)
-    return _ride_out(ride)
+    # 邮件通知乘客：失败不影响取消
+    try:
+        from . import notify as notify_mod
+        passenger = db.get(User, ride.passenger_id)
+        notify_mod.notify_status_change(
+            passenger.email if passenger else None,
+            "cancelled", ride.pickup_text, ride.dropoff_text)
+    except Exception:
+        pass
+    return _ride_out(ride, db, user)
 
 
 # ---------- web static (mount last so API routes win) ----------
