@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>司机 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261004b" />
+<link rel="stylesheet" href="styles.css?v=20261004c" />
 </head>
 <body>
 <div class="wrap">
@@ -25,7 +25,7 @@
     <div id="mine"></div>
   </div>
 </div>
-<script src="app.js?v=20261004b"></script>
+<script src="app.js?v=20261004c"></script>
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -39,6 +39,7 @@
       <div class="route"><span class="route-line"></span><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
+      <div class="meta">💰 ${esc(priceLabel(r))}</div>
       ${r.passenger_contact ? `<div class="meta">📞 乘客：${esc(r.passenger_contact)}</div>` : ""}
       ${actionsHtml}
     </div>`;
@@ -64,10 +65,28 @@
               ? `<button class="small primary" onclick="advanceRide('${r.id}','${next[0]}')">${next[1]}</button>` : "";
             const cancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status)
               ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消</button>` : "";
-            return rideCard2(r, `<div class="actions">${btns}${cancel}</div>`);
+            let quoteHtml = "";
+            if (r.price_mode === "quote" && ["accepted", "en_route"].includes(r.status)
+                && (r.price_status !== "pending" || r.price_quote_cents == null)) {
+              quoteHtml = `<div class="actions" style="margin-top:8px">
+                <input id="quote-${r.id}" type="number" min="0" step="0.5" placeholder="报价 $" style="width:110px" />
+                <button class="small primary" onclick="quoteRide('${r.id}')">报价</button>
+              </div>`;
+            } else if (r.price_mode === "quote" && r.price_status === "pending" && r.price_quote_cents != null) {
+              quoteHtml = `<div class="meta">⏳ 已报价 ${fmtPrice(r.price_quote_cents)}，等乘客确认</div>`;
+            }
+            return rideCard2(r, `<div class="actions">${btns}${cancel}</div>${quoteHtml}`);
           }).join("")
         : '<div class="empty"><span class="big">🛣️</span>暂无进行中的行程</div>';
     } catch (e) { $("mine").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+  }
+
+  async function quoteRide(id) {
+    const inp = $("quote-" + id);
+    const dollars = parseFloat(inp.value);
+    if (!(dollars > 0)) { alert("请填写报价"); return; }
+    try { await api.quoteRide(id, Math.round(dollars * 100)); refresh(); }
+    catch (e) { alert(e.message); }
   }
 
   async function acceptRide(id) {

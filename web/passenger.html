@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>乘客 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261004b" />
+<link rel="stylesheet" href="styles.css?v=20261004c" />
 </head>
 <body>
 <div class="wrap">
@@ -37,6 +37,24 @@
       </div>
       <label class="f" for="note">备注（可选）</label>
       <input id="note" placeholder="如：有大件行李、带小孩" />
+      <label class="f">价格方式</label>
+      <div class="row" style="gap:8px;margin-bottom:10px">
+        <button type="button" class="secondary small price-mode" data-mode="offer" style="flex:1">我出价</button>
+        <button type="button" class="secondary small price-mode" data-mode="mileage" style="flex:1">里程计价</button>
+        <button type="button" class="secondary small price-mode" data-mode="quote" style="flex:1">司机报价</button>
+      </div>
+      <div id="price-offer-wrap">
+        <label class="f" for="price-offer">你的出价（美元）</label>
+        <input id="price-offer" type="number" min="0" step="0.5" placeholder="如：25" />
+      </div>
+      <div id="price-mileage-wrap" style="display:none">
+        <label class="f" for="price-miles">预估里程（英里）</label>
+        <input id="price-miles" type="number" min="0" step="0.5" placeholder="如：10" />
+        <p class="hint" id="mileage-hint">起步 $8 + $3/英里</p>
+      </div>
+      <div id="price-quote-wrap" style="display:none">
+        <p class="hint">司机接单后会报价，你再确认。</p>
+      </div>
       <button class="primary pulse" id="btn-book">叫车</button>
       <p class="hint" id="book-msg"></p>
     </div>
@@ -45,21 +63,61 @@
     <div id="rides"></div>
   </div>
 </div>
-<script src="app.js?v=20261004b"></script>
+<script src="app.js?v=20261004c"></script>
 <script>
   const $ = (id) => document.getElementById(id);
+
+  // 价格方式切换
+  let priceMode = "offer";
+  document.querySelectorAll(".price-mode").forEach((b) => {
+    b.onclick = () => {
+      priceMode = b.dataset.mode;
+      document.querySelectorAll(".price-mode").forEach((x) =>
+        x.classList.toggle("primary", x === b));
+      $("price-offer-wrap").style.display = priceMode === "offer" ? "" : "none";
+      $("price-mileage-wrap").style.display = priceMode === "mileage" ? "" : "none";
+      $("price-quote-wrap").style.display = priceMode === "quote" ? "" : "none";
+    };
+  });
+  document.querySelector('.price-mode[data-mode="offer"]').classList.add("primary");
+  $("price-miles").oninput = () => {
+    const m = parseFloat($("price-miles").value);
+    $("mileage-hint").textContent = m > 0
+      ? `预估 $${(8 + 3 * m).toFixed(2)}（起步 $8 + $3/英里）`
+      : "起步 $8 + $3/英里";
+  };
+
+  async function confirmQuoteUI(id, cents) {
+    if (!confirm(`司机报价 $${(cents / 100).toFixed(2)}，接受吗？`)) return;
+    try { await api.confirmQuote(id, true); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+  async function rejectQuoteUI(id) {
+    if (!confirm("拒绝报价？订单会回到待接单，司机可重新报价。")) return;
+    try { await api.confirmQuote(id, false); refresh(); }
+    catch (e) { alert(e.message); }
+  }
 
   function rideCard2(r, actionsHtml = "") {
     const when = r.scheduled_at
       ? new Date(r.scheduled_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
       : "现在用车";
+    let quoteHtml = "";
+    if (r.price_mode === "quote" && r.price_status === "pending" && r.price_quote_cents != null) {
+      quoteHtml = `<div class="actions">
+        <button class="small primary" onclick="confirmQuoteUI('${r.id}', ${r.price_quote_cents})">接受 $${(r.price_quote_cents / 100).toFixed(2)}</button>
+        <button class="small secondary" onclick="rejectQuoteUI('${r.id}')">拒绝</button>
+      </div>`;
+    }
     return `<div class="card">
       <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
       <span class="time">${when}</span></div>
       <div class="route"><span class="route-line"></span><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
+      <div class="meta">💰 ${esc(priceLabel(r))}</div>
       ${actionsHtml}
+      ${quoteHtml}
     </div>`;
   }
 
@@ -90,16 +148,28 @@
     const dropoff_text = $("dropoff").value.trim();
     if (!pickup_text || !dropoff_text) { msg.classList.remove("ok"); msg.textContent = "请填写上车和下车地点"; return; }
     const when = $("when").value;
+    const data = {
+      pickup_text, dropoff_text,
+      seats_needed: parseInt($("seats").value) || 1,
+      note: $("note").value.trim(),
+      scheduled_at: when ? new Date(when).toISOString() : null,
+      price_mode: priceMode,
+    };
+    if (priceMode === "offer") {
+      const dollars = parseFloat($("price-offer").value);
+      if (!(dollars > 0)) { msg.classList.remove("ok"); msg.textContent = "请填写你的出价"; return; }
+      data.price_offer_cents = Math.round(dollars * 100);
+    } else if (priceMode === "mileage") {
+      const miles = parseFloat($("price-miles").value);
+      if (!(miles > 0)) { msg.classList.remove("ok"); msg.textContent = "请填写预估里程"; return; }
+      data.price_miles = miles;
+    }
     try {
-      await api.createRide({
-        pickup_text, dropoff_text,
-        seats_needed: parseInt($("seats").value) || 1,
-        note: $("note").value.trim(),
-        scheduled_at: when ? new Date(when).toISOString() : null,
-      });
+      await api.createRide(data);
       msg.classList.add("ok");
       msg.textContent = "✓ 下单成功，等待司机接单";
       $("pickup").value = $("dropoff").value = $("note").value = "";
+      $("price-offer").value = ""; $("price-miles").value = "";
       refresh();
     } catch (e) { msg.classList.remove("ok"); msg.textContent = e.message; }
   };

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import CHAR, TypeDecorator
@@ -71,6 +71,14 @@ class Ride(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # requested → accepted → en_route → arrived → in_progress → completed | cancelled
     status: Mapped[str] = mapped_column(String(16), default="requested", index=True)
+    # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价
+    price_mode: Mapped[str] = mapped_column(String(16), default="offer")
+    price_offer_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_miles: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_quote_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_final_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # pending=待确认 / agreed=已确认 / rejected=已拒绝
+    price_status: Mapped[str] = mapped_column(String(16), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

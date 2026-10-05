@@ -41,7 +41,27 @@ const api = {
   setStatus: (id, status) =>
     api.req(`/rides/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }),
   cancelRide: (id) => api.req(`/rides/${id}/cancel`, { method: "POST" }),
+  quoteRide: (id, cents) =>
+    api.req(`/rides/${id}/quote`, { method: "POST", body: JSON.stringify({ price_quote_cents: cents }) }),
+  confirmQuote: (id, accept) =>
+    api.req(`/rides/${id}/quote/confirm`, { method: "POST", body: JSON.stringify({ accept }) }),
 };
+
+// 价格展示：分 → $x.xx
+function fmtPrice(cents) {
+  if (cents == null) return "";
+  return "$" + (cents / 100).toFixed(2);
+}
+function priceLabel(r) {
+  if (r.price_mode === "offer") return `乘客出价 ${fmtPrice(r.price_offer_cents)}`;
+  if (r.price_mode === "mileage") return `里程计价 ${fmtPrice(r.price_final_cents)}（约${r.price_miles}英里）`;
+  if (r.price_mode === "quote") {
+    if (r.price_status === "agreed") return `已确认 ${fmtPrice(r.price_final_cents)}`;
+    if (r.price_quote_cents != null) return `司机报价 ${fmtPrice(r.price_quote_cents)}（待确认）`;
+    return "等司机报价";
+  }
+  return "";
+}
 
 const STATUS_LABEL = {
   requested: "待接单",

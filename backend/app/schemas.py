@@ -72,6 +72,18 @@ class RideCreate(BaseModel):
     seats_needed: int = Field(default=1, ge=1, le=20)
     note: str = Field(default="", max_length=1000)
     scheduled_at: datetime | None = None
+    # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价
+    price_mode: str = Field(default="offer", pattern="^(offer|mileage|quote)$")
+    price_offer_cents: int | None = Field(default=None, ge=0)
+    price_miles: float | None = Field(default=None, ge=0)
+
+
+class QuoteIn(BaseModel):
+    price_quote_cents: int = Field(ge=0, description="司机报价（分）")
+
+
+class QuoteConfirmIn(BaseModel):
+    accept: bool = Field(description="乘客是否接受报价")
 
 
 class RideStatusIn(BaseModel):
@@ -91,5 +103,12 @@ class RideOut(BaseModel):
     created_at: datetime
     # 乘客联系方式：仅乘客本人、接单司机、管理员可见
     passenger_contact: str | None = None
+    # 价格
+    price_mode: str = "offer"
+    price_offer_cents: int | None = None
+    price_miles: float | None = None
+    price_quote_cents: int | None = None
+    price_final_cents: int | None = None
+    price_status: str = "pending"
 
     model_config = {"from_attributes": True}
