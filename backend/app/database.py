@@ -42,3 +42,8 @@ def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(bind=engine)
+    # 已有表不会自动补索引（create_all 只建缺的表），这里幂等补上
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_driver_id ON rides (driver_id)"))
