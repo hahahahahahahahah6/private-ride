@@ -71,3 +71,12 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN tip_at TIMESTAMP"))
         if "stops_json" not in ride_cols:
             conn.execute(text("ALTER TABLE rides ADD COLUMN stops_json TEXT"))
+        # 老库补列：代叫车/评价标签/提醒标记
+        if "booked_for_name" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN booked_for_name VARCHAR(64) DEFAULT ''"))
+        if "booked_for_phone" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN booked_for_phone VARCHAR(32) DEFAULT ''"))
+        if "rating_tags_json" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN rating_tags_json TEXT"))
+        if "reminder_sent" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN reminder_sent INTEGER DEFAULT 0"))
