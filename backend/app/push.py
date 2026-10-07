@@ -42,8 +42,8 @@ def send_expo_push(messages: list[dict]) -> list[dict]:
 
 
 def notify_drivers_of_new_ride(db, ride) -> dict:
-    """新订单 → 推送给所有有 push_token 的司机。返回统计，不抛异常。"""
-    from .models import User  # 避免循环导入
+    """新订单 → 推送给所有在线且有 push_token 的司机。返回统计，不抛异常。"""
+    from .models import Driver, User  # 避免循环导入
 
     drivers = (
         db.query(User)
@@ -51,6 +51,10 @@ def notify_drivers_of_new_ride(db, ride) -> dict:
         .filter(User.push_token.isnot(None))
         .all()
     )
+    # 跳过挂了"休息中"的司机（没建档案的默认在线）
+    profs = {d.user_id: d for d in db.query(Driver).all()} if drivers else {}
+    drivers = [d for d in drivers
+               if (p := profs.get(d.id)) is None or p.is_active == 1]
     tokens = [d.push_token for d in drivers if is_expo_push_token(d.push_token)]
     if not tokens:
         return {"sent": 0, "skipped": len(drivers), "reason": "no valid push tokens"}
