@@ -187,6 +187,11 @@ def request_code(phone: str | None = None, email: str | None = None) -> dict:
     if now - last < REQUEST_CODE_INTERVAL_SECONDS:
         raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试")
     _last_request[ident] = now
+    # 防止长期运行内存膨胀：超量时丢掉最旧的记录
+    if len(_last_request) > 5000:
+        cutoff = now - 3600
+        for k in [k for k, t in _last_request.items() if t < cutoff]:
+            del _last_request[k]
 
     if kind == "phone" and _twilio_verify_configured():
         try:
