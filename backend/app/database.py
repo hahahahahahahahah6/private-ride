@@ -56,3 +56,11 @@ def init_db() -> None:
                 conn.execute(text(f"ALTER TABLE drivers ADD COLUMN {col} FLOAT"))
         if "last_loc_at" not in cols:
             conn.execute(text("ALTER TABLE drivers ADD COLUMN last_loc_at TIMESTAMP"))
+        # 老库补列：rides 表加评分字段
+        ride_cols = {c["name"] for c in inspect(conn).get_columns("rides")}
+        if "rating_stars" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN rating_stars INTEGER"))
+        if "rating_comment" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN rating_comment TEXT"))
+        if "rated_at" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN rated_at TIMESTAMP"))
