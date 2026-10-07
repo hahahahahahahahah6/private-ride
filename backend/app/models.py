@@ -61,6 +61,10 @@ class Driver(Base):
     plate: Mapped[str] = mapped_column(String(16), default="")
     seats: Mapped[int] = mapped_column(Integer, default=6)
     is_active: Mapped[int] = mapped_column(Integer, default=1)  # 1 = 接单中
+    # 实时位置（司机端上报，乘客在进行中订单里可见）
+    last_lat: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    last_lng: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    last_loc_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
 
 
 class Ride(Base):
