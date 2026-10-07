@@ -36,7 +36,11 @@ class FakeRide:
 
 
 class FakeUser:
+    _seq = 0
+
     def __init__(self, role, token):
+        FakeUser._seq += 1
+        self.id = f"u-{FakeUser._seq}"
         self.role = role
         self.push_token = token
 
@@ -58,11 +62,29 @@ class FakeQuery:
 
 
 class FakeDB:
-    def __init__(self, users):
+    def __init__(self, users, drivers=None):
         self._users = users
+        self._drivers = drivers or []
 
     def query(self, *a):
+        from app.models import Driver
+        if a and a[0] is Driver:
+            return FakeDriverQuery(self._drivers)
         return FakeQuery(self._users)
+
+
+class FakeDriver:
+    def __init__(self, user_id, is_active):
+        self.user_id = user_id
+        self.is_active = is_active
+
+
+class FakeDriverQuery:
+    def __init__(self, drivers):
+        self._drivers = drivers
+
+    def all(self):
+        return self._drivers
 
 
 def test_token_validation():
@@ -141,3 +163,25 @@ def test_notify_push_failure_does_not_raise():
         stat = push_mod.notify_drivers_of_new_ride(db, FakeRide())
     assert stat["sent"] == 0
     assert "push error" in stat["reason"]
+
+
+def test_notify_skips_offline_drivers():
+    users = [
+        FakeUser("driver", "ExponentPushToken[online1]"),
+        FakeUser("driver", "ExponentPushToken[offline1]"),
+    ]
+    users[0].id = "u-online"
+    users[1].id = "u-offline"
+    drivers = [FakeDriver("u-offline", 0)]  # 休息中
+    db = FakeDB(users, drivers)
+    bodies = []
+
+    def fake_urlopen(req, timeout=None):
+        bodies.append(json.loads(req.data.decode()))
+        n = len(json.loads(req.data.decode()))
+        return FakeResp({"data": [{"status": "ok"}] * n})
+
+    with patch.object(push_mod.urllib.request, "urlopen", fake_urlopen):
+        stat = push_mod.notify_drivers_of_new_ride(db, FakeRide())
+    assert stat["sent"] == 1
+    assert bodies[0][0]["to"] == "ExponentPushToken[online1]"
