@@ -25,6 +25,7 @@ from .schemas import (
     PushTokenIn,
     QuoteConfirmIn,
     QuoteIn,
+    RatingIn,
     RequestCodeIn,
     RideCreate,
     RideOut,
@@ -151,8 +152,24 @@ def _format_contact(passenger: User | None) -> str | None:
     return phone
 
 
+def _driver_rating_stats(db: Session, driver_ids: set) -> dict:
+    """批量查司机评分汇总：{driver_id: (avg, count)}。"""
+    from sqlalchemy import func
+
+    if not driver_ids:
+        return {}
+    rows = (
+        db.query(Ride.driver_id, func.avg(Ride.rating_stars), func.count(Ride.rating_stars))
+        .filter(Ride.driver_id.in_(driver_ids), Ride.rating_stars.isnot(None))
+        .group_by(Ride.driver_id)
+        .all()
+    )
+    return {r[0]: (round(float(r[1]), 1), r[2]) for r in rows}
+
+
 def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
-              pmap: dict | None = None, dmap: dict | None = None) -> Ride:
+              pmap: dict | None = None, dmap: dict | None = None,
+              rmap: dict | None = None) -> Ride:
     # 乘客联系方式只给相关人看：乘客本人、接单司机、管理员
     # 待接单列表里不暴露；已完成/已取消的订单不再显示（隐私）
     # pmap：批量预加载的 passenger 映射，避免列表页 N+1 查询
@@ -183,7 +200,12 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
     ):
         prof = dmap.get(ride.driver_id) if dmap is not None else db.get(Driver, ride.driver_id)
         if prof is not None and (prof.vehicle_model or prof.plate):
-            ride.driver_vehicle = DriverProfileOut.model_validate(prof)
+            dv = DriverProfileOut.model_validate(prof)
+            stats = (rmap.get(ride.driver_id) if rmap is not None
+                     else _driver_rating_stats(db, {ride.driver_id}).get(ride.driver_id))
+            if stats:
+                dv.avg_rating, dv.rating_count = stats
+            ride.driver_vehicle = dv
     return ride
 
 
@@ -285,7 +307,8 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
         drv_ids = {r.driver_id for r in rides if r.driver_id is not None}
         if drv_ids:
             dmap = {d.user_id: d for d in db.query(Driver).filter(Driver.user_id.in_(drv_ids)).all()}
-    return [_ride_out(r, db, user, pmap, dmap) for r in rides]
+    rmap = _driver_rating_stats(db, {r.driver_id for r in rides if r.driver_id is not None})
+    return [_ride_out(r, db, user, pmap, dmap, rmap) for r in rides]
 
 
 # ---------- 司机车辆档案 ----------
@@ -293,11 +316,13 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
 @app.get("/me/driver-profile", response_model=DriverProfileOut)
 def get_driver_profile(driver: User = Depends(require_driver),
                        db: Session = Depends(get_db)) -> DriverProfileOut:
-    """司机查看自己的车辆档案（没填过就返回空）。"""
+    """司机查看自己的车辆档案和评分汇总（没填过就返回空）。"""
     prof = db.get(Driver, driver.id)
-    if prof is None:
-        return DriverProfileOut()
-    return DriverProfileOut.model_validate(prof)
+    out = DriverProfileOut.model_validate(prof) if prof else DriverProfileOut()
+    stats = _driver_rating_stats(db, {driver.id}).get(driver.id)
+    if stats:
+        out.avg_rating, out.rating_count = stats
+    return out
 
 
 @app.put("/me/driver-profile", response_model=DriverProfileOut)
@@ -484,6 +509,28 @@ def confirm_quote(ride_id: uuid.UUID, payload: QuoteConfirmIn,
         ride.price_quote_cents = None
         ride.driver_id = None
         ride.status = "requested"
+    db.commit()
+    db.refresh(ride)
+    return _ride_out(ride, db, user)
+
+
+@app.post("/rides/{ride_id}/rate", response_model=RideOut)
+def rate_ride(ride_id: uuid.UUID, payload: RatingIn,
+              user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)) -> Ride:
+    """行程完成后，乘客给司机打分（1-5 星，可附一句话）。只能评一次。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if ride.passenger_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="只有乘客能评分")
+    if ride.status != "completed":
+        raise HTTPException(status_code=400, detail="行程完成后才能评分")
+    if ride.rating_stars is not None:
+        raise HTTPException(status_code=409, detail="已经评过分了")
+    ride.rating_stars = payload.stars
+    ride.rating_comment = payload.comment.strip() or None
+    ride.rated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(ride)
     return _ride_out(ride, db, user)
