@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>乘客 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006a" />
+<link rel="stylesheet" href="styles.css?v=20261006b" />
 </head>
 <body>
 <div class="wrap">
@@ -76,7 +76,7 @@
     <div id="rides"></div>
   </div>
 </div>
-<script src="app.js?v=20261006a"></script>
+<script src="app.js?v=20261006b"></script>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -191,9 +191,24 @@
       <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${r.driver_vehicle && (r.driver_vehicle.vehicle_model || r.driver_vehicle.plate)
         ? `<div class="meta">🚙 车辆：${esc(r.driver_vehicle.vehicle_model)}${r.driver_vehicle.plate ? " · " + esc(r.driver_vehicle.plate) : ""}</div>` : ""}
+      ${["accepted", "en_route", "arrived", "in_progress"].includes(r.status) && r.driver_id
+        ? `<div class="meta" id="drvloc-${r.id}">📍 司机位置加载中…</div>` : ""}
       ${actionsHtml}
       ${quoteHtml}
     </div>`;
+  }
+
+  async function refreshDriverLoc(id, pickupText) {
+    const el = $("drvloc-" + id);
+    if (!el) return;
+    try {
+      const loc = await api.req(`/rides/${id}/driver-location`);
+      if (!loc) { el.textContent = "📍 司机暂未共享位置"; return; }
+      const mins = Math.round((Date.now() - new Date(loc.updated_at).getTime()) / 60000);
+      const when = mins <= 0 ? "刚刚" : `${mins} 分钟前`;
+      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${loc.lat},${loc.lng}&destination=${encodeURIComponent(pickupText)}`;
+      el.innerHTML = `📍 司机位置（${when}更新）· <a href="${mapsUrl}" target="_blank">看路线和预计到达时间</a>`;
+    } catch (e) { el.textContent = ""; }
   }
 
   async function refresh() {
@@ -208,6 +223,11 @@
             return rideCard2(r, actions);
           }).join("")
         : '<div class="empty"><span class="big">🚗</span>还没有订单<br />在上面填好地点，一键叫车</div>';
+      rides.forEach((r) => {
+        if (["accepted", "en_route", "arrived", "in_progress"].includes(r.status) && r.driver_id) {
+          refreshDriverLoc(r.id, r.pickup_text);
+        }
+      });
     } catch (e) { $("rides").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
   }
 
