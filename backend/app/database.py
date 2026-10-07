@@ -64,3 +64,10 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN rating_comment TEXT"))
         if "rated_at" not in ride_cols:
             conn.execute(text("ALTER TABLE rides ADD COLUMN rated_at TIMESTAMP"))
+        # 老库补列：rides 表加小费和经停点字段
+        if "tip_cents" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN tip_cents INTEGER"))
+        if "tip_at" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN tip_at TIMESTAMP"))
+        if "stops_json" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN stops_json TEXT"))
