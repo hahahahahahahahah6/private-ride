@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>司机 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006a" />
+<link rel="stylesheet" href="styles.css?v=20261006b" />
 </head>
 <body>
 <div class="wrap">
@@ -47,6 +47,7 @@
       <input id="v-plate" placeholder="例如：8ABC123" maxlength="16" style="text-transform:uppercase" />
       <div class="actions"><button class="small primary" id="btn-save-vehicle">保存车辆信息</button></div>
       <p class="hint" id="vehicle-msg"></p>
+      <p class="hint" id="loc-badge"></p>
     </div>
     <div class="sec"><h3>待接订单</h3><span class="count" id="open-count"></span></div>
     <div id="open"></div>
@@ -54,7 +55,7 @@
     <div id="mine"></div>
   </div>
 </div>
-<script src="app.js?v=20261006a"></script>
+<script src="app.js?v=20261006b"></script>
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -99,6 +100,7 @@
 
     try {
       const mine = (await api.myRides()).filter((r) => !["completed", "cancelled"].includes(r.status));
+      maybeShareLocation(mine.length > 0);
       $("mine-count").textContent = mine.length ? `${mine.length} 单进行中` : "";
       $("mine").innerHTML = mine.length
         ? mine.map((r) => {
@@ -198,6 +200,34 @@
       msg.textContent = "✓ 已保存，乘客在进行中的订单里能看到你的车";
     } catch (e) { msg.textContent = e.message; }
   };
+
+  // ---- 实时位置共享：有进行中订单时自动上报 GPS ----
+  let locWatchId = null, lastLocSent = 0;
+  async function sendLocation(lat, lng) {
+    const now = Date.now();
+    if (now - lastLocSent < 15000) return; // 15 秒节流
+    lastLocSent = now;
+    try {
+      await api.req("/me/location", {
+        method: "POST", body: JSON.stringify({ lat, lng }),
+      });
+    } catch (e) { /* 静默：下次再试 */ }
+  }
+  function maybeShareLocation(hasActiveRide) {
+    const badge = $("loc-badge");
+    if (hasActiveRide && "geolocation" in navigator && locWatchId === null) {
+      locWatchId = navigator.geolocation.watchPosition(
+        (pos) => sendLocation(pos.coords.latitude, pos.coords.longitude),
+        () => { if (badge) badge.textContent = "⚠️ 位置权限被拒，乘客看不到你的实时位置"; },
+        { enableHighAccuracy: true, maximumAge: 10000 }
+      );
+      if (badge) badge.textContent = "📍 正在共享位置给乘客";
+    } else if (!hasActiveRide && locWatchId !== null) {
+      navigator.geolocation.clearWatch(locWatchId);
+      locWatchId = null;
+      if (badge) badge.textContent = "";
+    }
+  }
 
   ensureSession($("login"), $("main"), () => checkRoleAndShow());
   setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
