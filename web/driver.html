@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>司机 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006d" />
+<link rel="stylesheet" href="styles.css?v=20261006e" />
 </head>
 <body>
 <div class="wrap">
@@ -72,7 +72,7 @@
     <div id="mine"></div>
   </div>
 </div>
-<script src="app.js?v=20261006d"></script>
+<script src="app.js?v=20261006e"></script>
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -108,12 +108,38 @@
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       ${stops}
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
+      ${r.booked_for_name ? `<div class="meta">🧑‍🤝‍🧑 代叫：${esc(r.booked_for_name)}${r.booked_for_phone ? " · " + esc(r.booked_for_phone) : ""}</div>` : ""}
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${r.passenger_contact ? `<div class="meta">📞 乘客：${contactLinks(r.passenger_contact)}</div>` : ""}
       <div class="meta">🗺️ <a href="${navUrl}" target="_blank">${navLabel}</a></div>
       ${actionsHtml}
     </div>`;
+  }
+
+  // ---- 新订单提示音：来新单时叮一声（首次点击页面后解锁音频权限） ----
+  let _audioCtx = null;
+  const _knownOpen = new Set();
+  let _firstOpenLoad = true;
+  document.addEventListener("pointerdown", () => {
+    if (!_audioCtx) {
+      try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* */ }
+    }
+    if (_audioCtx && _audioCtx.state === "suspended") _audioCtx.resume();
+  });
+  function beep() {
+    try {
+      if (!_audioCtx) return;
+      const t = _audioCtx.currentTime;
+      const o = _audioCtx.createOscillator();
+      const g = _audioCtx.createGain();
+      o.connect(g); g.connect(_audioCtx.destination);
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      o.start(t); o.stop(t + 0.65);
+    } catch (e) { /* */ }
   }
 
   async function refresh() {
@@ -124,6 +150,14 @@
         ? open.map((r) => rideCard2(r,
             `<div class="actions"><button class="small primary go" onclick="acceptRide('${r.id}')">接单</button></div>`)).join("")
         : '<div class="empty"><span class="big">☕</span>暂无待接订单<br />有新订单会实时出现在这里</div>';
+      // 新出现的订单 ID → 提示音（首次加载不响）
+      const ids = new Set(open.map((r) => r.id));
+      if (!_firstOpenLoad) {
+        for (const id of ids) { if (!_knownOpen.has(id)) { beep(); break; } }
+      }
+      _firstOpenLoad = false;
+      _knownOpen.clear();
+      ids.forEach((id) => _knownOpen.add(id));
     } catch (e) { $("open").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
 
     try {
@@ -254,7 +288,7 @@
       $("v-plate").value = p.plate || "";
       $("v-seats").value = p.seats || 6;
       $("rating-line").textContent = p.rating_count > 0
-        ? `⭐ 平均 ${p.avg_rating} 分（${p.rating_count} 条评价）`
+        ? `⭐ 平均 ${p.avg_rating} 分（${p.rating_count} 条评价）${(p.top_tags || []).length ? " · 乘客常夸：" + p.top_tags.join("、") : ""}`
         : "";
     } catch (e) { /* 没填过就空着 */ }
   }
