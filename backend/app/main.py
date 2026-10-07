@@ -16,8 +16,10 @@ from sqlalchemy.orm import Session
 from . import auth
 from .auth import get_current_user, require_driver
 from .database import get_db, init_db
-from .models import InviteCode, Ride, User
+from .models import Driver, InviteCode, Ride, User
 from .schemas import (
+    DriverProfileIn,
+    DriverProfileOut,
     PushTokenIn,
     QuoteConfirmIn,
     QuoteIn,
@@ -148,7 +150,7 @@ def _format_contact(passenger: User | None) -> str | None:
 
 
 def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
-              pmap: dict | None = None) -> Ride:
+              pmap: dict | None = None, dmap: dict | None = None) -> Ride:
     # 乘客联系方式只给相关人看：乘客本人、接单司机、管理员
     # 待接单列表里不暴露；已完成/已取消的订单不再显示（隐私）
     # pmap：批量预加载的 passenger 映射，避免列表页 N+1 查询
@@ -165,6 +167,21 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
         ride.passenger_contact = _format_contact(passenger)
     else:
         ride.passenger_contact = None
+    # 司机车辆信息只给该单乘客、司机本人、管理员看（进行中订单）
+    ride.driver_vehicle = None
+    if (
+        viewer is not None
+        and ride.status not in ("completed", "cancelled")
+        and ride.driver_id is not None
+        and (
+            viewer.role == "admin"
+            or ride.passenger_id == viewer.id
+            or ride.driver_id == viewer.id
+        )
+    ):
+        prof = dmap.get(ride.driver_id) if dmap is not None else db.get(Driver, ride.driver_id)
+        if prof is not None and (prof.vehicle_model or prof.plate):
+            ride.driver_vehicle = DriverProfileOut.model_validate(prof)
     return ride
 
 
@@ -257,12 +274,45 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
         else:
             q = q.filter(Ride.passenger_id == user.id)
     rides = q.limit(limit).offset(offset).all()
-    # 批量预加载乘客，避免每单一次查询（N+1）
+    # 批量预加载乘客和司机车辆，避免每单一次查询（N+1）
     pmap = None
+    dmap = None
     if rides:
         pax_ids = {r.passenger_id for r in rides}
         pmap = {u.id: u for u in db.query(User).filter(User.id.in_(pax_ids)).all()}
-    return [_ride_out(r, db, user, pmap) for r in rides]
+        drv_ids = {r.driver_id for r in rides if r.driver_id is not None}
+        if drv_ids:
+            dmap = {d.user_id: d for d in db.query(Driver).filter(Driver.user_id.in_(drv_ids)).all()}
+    return [_ride_out(r, db, user, pmap, dmap) for r in rides]
+
+
+# ---------- 司机车辆档案 ----------
+
+@app.get("/me/driver-profile", response_model=DriverProfileOut)
+def get_driver_profile(driver: User = Depends(require_driver),
+                       db: Session = Depends(get_db)) -> DriverProfileOut:
+    """司机查看自己的车辆档案（没填过就返回空）。"""
+    prof = db.get(Driver, driver.id)
+    if prof is None:
+        return DriverProfileOut()
+    return DriverProfileOut.model_validate(prof)
+
+
+@app.put("/me/driver-profile", response_model=DriverProfileOut)
+def set_driver_profile(payload: DriverProfileIn,
+                       driver: User = Depends(require_driver),
+                       db: Session = Depends(get_db)) -> DriverProfileOut:
+    """司机填写/更新车辆信息，乘客在进行中的订单里能看到。"""
+    prof = db.get(Driver, driver.id)
+    if prof is None:
+        prof = Driver(user_id=driver.id)
+        db.add(prof)
+    prof.vehicle_model = payload.vehicle_model.strip()
+    prof.plate = payload.plate.strip().upper()
+    prof.seats = payload.seats
+    db.commit()
+    db.refresh(prof)
+    return DriverProfileOut.model_validate(prof)
 
 
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
@@ -314,7 +364,9 @@ def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
     db.commit()
     if rows == 0:
         raise HTTPException(status_code=409, detail="该订单已被接走或不存在")
+    # bulk update 不经过 ORM，identity map 里的是旧值，必须 refresh
     ride = db.get(Ride, ride_id)
+    db.refresh(ride)
     # 邮件通知乘客：失败不影响接单
     try:
         from . import notify as notify_mod
