@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>乘客 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261004c" />
+<link rel="stylesheet" href="styles.css?v=20261006a" />
 </head>
 <body>
 <div class="wrap">
@@ -76,7 +76,7 @@
     <div id="rides"></div>
   </div>
 </div>
-<script src="app.js?v=20261004c"></script>
+<script src="app.js?v=20261006a"></script>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -189,6 +189,8 @@
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
+      ${r.driver_vehicle && (r.driver_vehicle.vehicle_model || r.driver_vehicle.plate)
+        ? `<div class="meta">🚙 车辆：${esc(r.driver_vehicle.vehicle_model)}${r.driver_vehicle.plate ? " · " + esc(r.driver_vehicle.plate) : ""}</div>` : ""}
       ${actionsHtml}
       ${quoteHtml}
     </div>`;
