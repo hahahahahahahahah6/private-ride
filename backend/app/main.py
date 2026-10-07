@@ -18,8 +18,10 @@ from .auth import get_current_user, require_driver
 from .database import get_db, init_db
 from .models import Driver, InviteCode, Ride, User
 from .schemas import (
+    DriverLocationOut,
     DriverProfileIn,
     DriverProfileOut,
+    LocationIn,
     PushTokenIn,
     QuoteConfirmIn,
     QuoteIn,
@@ -313,6 +315,51 @@ def set_driver_profile(payload: DriverProfileIn,
     db.commit()
     db.refresh(prof)
     return DriverProfileOut.model_validate(prof)
+
+
+# ---------- 司机实时位置 ----------
+
+@app.post("/me/location")
+def update_location(payload: LocationIn,
+                    driver: User = Depends(require_driver),
+                    db: Session = Depends(get_db)) -> dict:
+    """司机上报实时位置。司机端网页在有进行中订单时自动上报（约 15 秒一次）。"""
+    prof = db.get(Driver, driver.id)
+    if prof is None:
+        prof = Driver(user_id=driver.id)
+        db.add(prof)
+    prof.last_lat = payload.lat
+    prof.last_lng = payload.lng
+    prof.last_loc_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/rides/{ride_id}/driver-location", response_model=DriverLocationOut | None)
+def driver_location(ride_id: uuid.UUID,
+                    user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)) -> DriverLocationOut | None:
+    """乘客查看进行中订单的司机实时位置。超过 10 分钟没更新就不再返回。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if not (user.role == "admin"
+            or ride.passenger_id == user.id
+            or ride.driver_id == user.id):
+        raise HTTPException(status_code=403, detail="无权查看")
+    if ride.status not in ("accepted", "en_route", "arrived", "in_progress"):
+        return None
+    if ride.driver_id is None:
+        return None
+    prof = db.get(Driver, ride.driver_id)
+    if prof is None or prof.last_lat is None or prof.last_lng is None or prof.last_loc_at is None:
+        return None
+    loc_at = prof.last_loc_at
+    if loc_at.tzinfo is None:
+        loc_at = loc_at.replace(tzinfo=timezone.utc)
+    if (datetime.now(timezone.utc) - loc_at).total_seconds() > 600:
+        return None
+    return DriverLocationOut(lat=prof.last_lat, lng=prof.last_lng, updated_at=loc_at)
 
 
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
