@@ -102,6 +102,13 @@ class Ride(Base):
     tip_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     # 多经停：JSON 数组 ["地址1", "地址2"]，最多 3 个
     stops_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # 代叫车：帮家人/朋友叫车时填乘车人信息
+    booked_for_name: Mapped[str] = mapped_column(String(64), default="")
+    booked_for_phone: Mapped[str] = mapped_column(String(32), default="")
+    # 评价标签：JSON 数组，如 ["开车稳", "很准时"]
+    rating_tags_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # 预约提醒是否已发送
+    reminder_sent: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
