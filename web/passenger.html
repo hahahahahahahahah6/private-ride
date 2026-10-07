@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>乘客 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006b" />
+<link rel="stylesheet" href="styles.css?v=20261006c" />
 </head>
 <body>
 <div class="wrap">
@@ -76,7 +76,7 @@
     <div id="rides"></div>
   </div>
 </div>
-<script src="app.js?v=20261006b"></script>
+<script src="app.js?v=20261006c"></script>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -190,9 +190,12 @@
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${r.driver_vehicle && (r.driver_vehicle.vehicle_model || r.driver_vehicle.plate)
-        ? `<div class="meta">🚙 车辆：${esc(r.driver_vehicle.vehicle_model)}${r.driver_vehicle.plate ? " · " + esc(r.driver_vehicle.plate) : ""}</div>` : ""}
+        ? `<div class="meta">🚙 车辆：${esc(r.driver_vehicle.vehicle_model)}${r.driver_vehicle.plate ? " · " + esc(r.driver_vehicle.plate) : ""}${r.driver_vehicle.rating_count > 0 ? ` · ⭐${r.driver_vehicle.avg_rating}（${r.driver_vehicle.rating_count}评）` : ""}</div>` : ""}
       ${["accepted", "en_route", "arrived", "in_progress"].includes(r.status) && r.driver_id
         ? `<div class="meta" id="drvloc-${r.id}">📍 司机位置加载中…</div>` : ""}
+      ${r.status === "completed" ? (r.rating_stars
+        ? `<div class="meta">⭐ 你给了 ${r.rating_stars} 星${r.rating_comment ? " · " + esc(r.rating_comment) : ""}</div>`
+        : `<div class="meta">给司机打分：${[1, 2, 3, 4, 5].map((s) => `<button class="small secondary" style="padding:2px 8px" onclick="rateRide('${r.id}',${s})">⭐${s}</button>`).join(" ")}</div>`) : ""}
       ${actionsHtml}
       ${quoteHtml}
     </div>`;
@@ -234,6 +237,11 @@
   async function cancelRide(id) {
     if (!confirm("确定取消这单吗？")) return;
     try { await api.cancelRide(id); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+
+  async function rateRide(id, stars) {
+    try { await api.rateRide(id, stars); refresh(); }
     catch (e) { alert(e.message); }
   }
 
