@@ -19,6 +19,7 @@ from .auth import get_current_user, require_driver
 from .database import get_db, init_db
 from .models import Driver, InviteCode, Ride, SavedPlace, ShareToken, User
 from .schemas import (
+    RATING_TAGS,
     DriverLocationOut,
     DriverProfileIn,
     DriverProfileOut,
@@ -175,6 +176,25 @@ def _driver_rating_stats(db: Session, driver_ids: set) -> dict:
     return {r[0]: (round(float(r[1]), 1), r[2]) for r in rows}
 
 
+def _driver_top_tags(db: Session, driver_id: uuid.UUID, limit: int = 3) -> list[str]:
+    """司机被选最多的评价标签 top3。"""
+    from collections import Counter
+
+    rows = (
+        db.query(Ride.rating_tags_json)
+        .filter(Ride.driver_id == driver_id, Ride.rating_tags_json.isnot(None))
+        .all()
+    )
+    c = Counter()
+    for (raw,) in rows:
+        try:
+            tags = json.loads(raw) or []
+        except Exception:
+            continue
+        c.update(t for t in tags if t)
+    return [t for t, _ in c.most_common(limit)]
+
+
 def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
               pmap: dict | None = None, dmap: dict | None = None,
               rmap: dict | None = None) -> Ride:
@@ -199,8 +219,18 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
         ride.stops = json.loads(ride.stops_json) if ride.stops_json else []
     except Exception:
         ride.stops = []
-    # 司机车辆信息只给该单乘客、司机本人、管理员看（进行中订单）
+    # 代叫车信息直接读列（乘客本人填的都可见）
+    ride.booked_for_name = ride.booked_for_name or ""
+    ride.booked_for_phone = ride.booked_for_phone or ""
+    # 评价标签：JSON 解析成列表
+    try:
+        ride.rating_tags = json.loads(ride.rating_tags_json) if ride.rating_tags_json else []
+    except Exception:
+        ride.rating_tags = []
+    # 司机车辆和电话只给该单乘客、司机本人、管理员看（进行中订单）
+    # 乘客视角：能看到车型车牌，还能一键拨打司机电话
     ride.driver_vehicle = None
+    ride.driver_phone = None
     if (
         viewer is not None
         and ride.status not in ("completed", "cancelled")
@@ -211,6 +241,9 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
             or ride.driver_id == viewer.id
         )
     ):
+        duser = pmap.get(ride.driver_id) if pmap is not None else db.get(User, ride.driver_id)
+        if duser is not None and duser.phone and not duser.phone.startswith("email:"):
+            ride.driver_phone = duser.phone
         prof = dmap.get(ride.driver_id) if dmap is not None else db.get(Driver, ride.driver_id)
         if prof is not None and (prof.vehicle_model or prof.plate):
             dv = DriverProfileOut.model_validate(prof)
@@ -284,6 +317,8 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
         price_status="agreed" if final_cents is not None else "pending",
         pay_mode=payload.pay_mode,
         stops_json=json.dumps(stops, ensure_ascii=False) if stops else None,
+        booked_for_name=payload.booked_for_name.strip()[:64],
+        booked_for_phone=payload.booked_for_phone.strip()[:32],
     )
     db.add(ride)
     db.commit()
@@ -313,12 +348,12 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
         else:
             q = q.filter(Ride.passenger_id == user.id)
     rides = q.limit(limit).offset(offset).all()
-    # 批量预加载乘客和司机车辆，避免每单一次查询（N+1）
+    # 批量预加载乘客、司机用户和司机车辆，避免每单一次查询（N+1）
     pmap = None
     dmap = None
     if rides:
-        pax_ids = {r.passenger_id for r in rides}
-        pmap = {u.id: u for u in db.query(User).filter(User.id.in_(pax_ids)).all()}
+        user_ids = {r.passenger_id for r in rides} | {r.driver_id for r in rides if r.driver_id is not None}
+        pmap = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()}
         drv_ids = {r.driver_id for r in rides if r.driver_id is not None}
         if drv_ids:
             dmap = {d.user_id: d for d in db.query(Driver).filter(Driver.user_id.in_(drv_ids)).all()}
@@ -337,6 +372,7 @@ def get_driver_profile(driver: User = Depends(require_driver),
     stats = _driver_rating_stats(db, {driver.id}).get(driver.id)
     if stats:
         out.avg_rating, out.rating_count = stats
+    out.top_tags = _driver_top_tags(db, driver.id)
     return out
 
 
@@ -743,6 +779,9 @@ def rate_ride(ride_id: uuid.UUID, payload: RatingIn,
         raise HTTPException(status_code=409, detail="已经评过分了")
     ride.rating_stars = payload.stars
     ride.rating_comment = payload.comment.strip() or None
+    # 标签只收预设里的，最多 3 个
+    tags = [t for t in (payload.tags or []) if t in RATING_TAGS][:3]
+    ride.rating_tags_json = json.dumps(tags, ensure_ascii=False) if tags else None
     ride.rated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(ride)
@@ -768,6 +807,50 @@ def tip_ride(ride_id: uuid.UUID, payload: TipIn,
     db.commit()
     db.refresh(ride)
     return _ride_out(ride, db, user)
+
+
+# 催司机节流：每单每 5 分钟最多催一次（内存字典 + 定期清理）
+_nudge_ts: dict[str, float] = {}
+
+
+@app.post("/rides/{ride_id}/nudge")
+def nudge_driver(ride_id: uuid.UUID,
+                 user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)) -> dict:
+    """乘客催司机：给司机发一条 Expo 推送提醒。每单 5 分钟内只能催一次。"""
+    import time as _time
+
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if ride.passenger_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="只有乘客能催司机")
+    if ride.status not in ("accepted", "en_route") or ride.driver_id is None:
+        raise HTTPException(status_code=400, detail="司机还没接单，催不了")
+    now = _time.time()
+    key = str(ride_id)
+    # 清理过期记录，避免字典膨胀
+    for k, ts in list(_nudge_ts.items()):
+        if now - ts > 600:
+            del _nudge_ts[k]
+    if now - _nudge_ts.get(key, 0) < 300:
+        raise HTTPException(status_code=429, detail="刚催过，稍等 5 分钟再催")
+    _nudge_ts[key] = now
+    try:
+        from . import push as push_mod
+
+        driver = db.get(User, ride.driver_id)
+        token = getattr(driver, "push_token", None)
+        if token and push_mod.is_expo_push_token(token):
+            push_mod.send_expo_push([{
+                "to": token,
+                "title": "乘客在等你",
+                "body": f"乘客催了一下：{ride.pickup_text}，请尽快出发 🚗",
+                "sound": "default",
+            }])
+    except Exception:
+        log.warning("nudge push failed for ride %s", ride_id, exc_info=True)
+    return {"ok": True}
 
 
 @app.post("/rides/{ride_id}/status", response_model=RideOut)
