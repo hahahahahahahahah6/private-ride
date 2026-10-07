@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>司机 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006c" />
+<link rel="stylesheet" href="styles.css?v=20261006d" />
 </head>
 <body>
 <div class="wrap">
@@ -32,6 +32,22 @@
 
   <div id="main" style="display:none">
     <div class="card">
+      <div class="card_h">接单状态</div>
+      <div class="row" style="align-items:center">
+        <span id="online-label" style="flex:1">🟢 在线接单中</span>
+        <button class="small primary" id="btn-toggle-online">切换</button>
+      </div>
+      <p class="hint">休息时切换为离线，新订单不会再推送给你。</p>
+    </div>
+    <div class="card">
+      <div class="card_h">收入统计</div>
+      <div class="row" style="gap:8px;margin-bottom:8px">
+        <button type="button" class="secondary small earn-days" data-days="7" style="flex:1">近 7 天</button>
+        <button type="button" class="secondary small earn-days" data-days="30" style="flex:1">近 30 天</button>
+      </div>
+      <div class="meta" id="earn-line">加载中…</div>
+    </div>
+    <div class="card">
       <div class="card_h">我的车辆</div>
       <div class="row">
         <div style="flex:2">
@@ -56,7 +72,7 @@
     <div id="mine"></div>
   </div>
 </div>
-<script src="app.js?v=20261006c"></script>
+<script src="app.js?v=20261006d"></script>
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -75,16 +91,27 @@
     const when = r.scheduled_at
       ? new Date(r.scheduled_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
       : "现在用车";
+    const stops = (r.stops && r.stops.length)
+      ? `<div class="meta">📍 经停：${r.stops.map(esc).join(" → ")}</div>` : "";
+    // 去接人：导航到上车点；行程中：导航全程（上车点→经停→下车点）
+    const navUrl = ["arrived", "in_progress"].includes(r.status)
+      ? "https://www.google.com/maps/dir/?api=1"
+        + "&origin=" + encodeURIComponent(r.pickup_text)
+        + "&destination=" + encodeURIComponent(r.dropoff_text)
+        + ((r.stops && r.stops.length) ? "&waypoints=" + r.stops.map(encodeURIComponent).join("|") : "")
+      : "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(r.pickup_text);
+    const navLabel = ["arrived", "in_progress"].includes(r.status) ? "导航行程路线" : "导航到上车点";
     return `<div class="card">
       <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
       <span class="time">${when}</span></div>
       <div class="route"><span class="route-line"></span><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
+      ${stops}
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${r.passenger_contact ? `<div class="meta">📞 乘客：${contactLinks(r.passenger_contact)}</div>` : ""}
-      <div class="meta">🗺️ <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.pickup_text)}" target="_blank">导航到上车点</a></div>
+      <div class="meta">🗺️ <a href="${navUrl}" target="_blank">${navLabel}</a></div>
       ${actionsHtml}
     </div>`;
   }
@@ -168,6 +195,8 @@
         $("invite").style.display = "none";
         $("main").style.display = "";
         loadVehicle();
+        loadOnline();
+        loadEarnings(7);
         refresh();
       } else {
         $("main").style.display = "none";
@@ -176,6 +205,46 @@
     } catch (e) {
       $("invite").style.display = "none";
     }
+  }
+
+  // ---- 在线/离线 ----
+  async function loadOnline() {
+    try {
+      const r = await api.req("/me/online");
+      setOnlineLabel(r.online);
+    } catch (e) { /* */ }
+  }
+  function setOnlineLabel(online) {
+    $("online-label").textContent = online ? "🟢 在线接单中" : "🔴 休息中（不接新单）";
+  }
+  $("btn-toggle-online").onclick = async () => {
+    const nowOnline = $("online-label").textContent.includes("在线");
+    try {
+      const r = await api.req("/me/online", {
+        method: "POST", body: JSON.stringify({ online: !nowOnline }),
+      });
+      setOnlineLabel(r.online);
+    } catch (e) { alert(e.message); }
+  };
+
+  // ---- 收入统计 ----
+  let earnDays = 7;
+  document.querySelectorAll(".earn-days").forEach((b) => {
+    b.onclick = () => {
+      earnDays = parseInt(b.dataset.days);
+      document.querySelectorAll(".earn-days").forEach((x) =>
+        x.classList.toggle("primary", x === b));
+      loadEarnings(earnDays);
+    };
+  });
+  document.querySelector('.earn-days[data-days="7"]').classList.add("primary");
+  async function loadEarnings(days) {
+    const el = $("earn-line");
+    el.textContent = "加载中…";
+    try {
+      const r = await api.req(`/me/earnings?days=${days}`);
+      el.textContent = `完成 ${r.completed_count} 单 · 车费 $${(r.fare_cents / 100).toFixed(2)} · 小费 $${(r.tip_cents / 100).toFixed(2)} · 合计 $${(r.total_cents / 100).toFixed(2)}${r.avg_rating ? ` · ⭐${r.avg_rating}` : ""}`;
+    } catch (e) { el.textContent = e.message; }
   }
 
   async function loadVehicle() {
