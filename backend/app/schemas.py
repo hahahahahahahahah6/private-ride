@@ -105,6 +105,8 @@ class RideCreate(BaseModel):
     seats_needed: int = Field(default=1, ge=1, le=20)
     note: str = Field(default="", max_length=1000)
     scheduled_at: datetime | None = None
+    # 多经停：最多 3 个
+    stops: list[str] = Field(default_factory=list, max_length=3)
     # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价
     price_mode: str = Field(default="offer", pattern="^(offer|mileage|quote)$")
     price_offer_cents: int | None = Field(default=None, ge=0)
@@ -124,6 +126,10 @@ class QuoteConfirmIn(BaseModel):
 class RatingIn(BaseModel):
     stars: int = Field(ge=1, le=5, description="1-5 星")
     comment: str = Field(default="", max_length=500)
+
+
+class TipIn(BaseModel):
+    tip_cents: int = Field(ge=100, description="小费（分），最低 $1")
 
 
 class RideStatusIn(BaseModel):
@@ -158,5 +164,62 @@ class RideOut(BaseModel):
     # 评分（行程完成后乘客打分）
     rating_stars: int | None = None
     rating_comment: str | None = None
+    # 小费（分）
+    tip_cents: int | None = None
+    # 经停点
+    stops: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+
+
+# ---------- 常用地址 ----------
+
+class SavedPlaceIn(BaseModel):
+    label: str = Field(min_length=1, max_length=32, description="如：家、面馆")
+    address_text: str = Field(min_length=1, max_length=500)
+
+
+class SavedPlaceOut(BaseModel):
+    id: uuid.UUID
+    label: str
+    address_text: str
+
+    model_config = {"from_attributes": True}
+
+
+# ---------- 行程分享 ----------
+
+class ShareOut(BaseModel):
+    url: str
+    expires_at: datetime
+
+
+class SharedRideOut(BaseModel):
+    """公开分享页的数据：不含乘客隐私信息。"""
+    status: str
+    pickup_text: str
+    dropoff_text: str
+    stops: list[str] = Field(default_factory=list)
+    scheduled_at: datetime | None
+    vehicle_model: str = ""
+    plate: str = ""
+    driver_lat: float | None = None
+    driver_lng: float | None = None
+    location_updated_at: datetime | None = None
+
+
+# ---------- 司机状态 / 收入 ----------
+
+class DriverStatusOut(BaseModel):
+    name: str
+    vehicle_model: str = ""
+    is_active: bool = True
+
+
+class EarningsOut(BaseModel):
+    days: int
+    completed_count: int
+    fare_cents: int
+    tip_cents: int
+    total_cents: int
+    avg_rating: float | None = None
