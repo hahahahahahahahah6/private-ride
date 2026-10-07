@@ -68,7 +68,7 @@ class Ride(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     passenger_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
-    driver_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
+    driver_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True, index=True)
     pickup_text: Mapped[str] = mapped_column(Text, default="")
     dropoff_text: Mapped[str] = mapped_column(Text, default="")
     seats_needed: Mapped[int] = mapped_column(Integer, default=1)
