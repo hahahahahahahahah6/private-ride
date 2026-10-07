@@ -45,6 +45,8 @@ const api = {
     api.req(`/rides/${id}/quote`, { method: "POST", body: JSON.stringify({ price_quote_cents: cents }) }),
   confirmQuote: (id, accept) =>
     api.req(`/rides/${id}/quote/confirm`, { method: "POST", body: JSON.stringify({ accept }) }),
+  rateRide: (id, stars, comment = "") =>
+    api.req(`/rides/${id}/rate`, { method: "POST", body: JSON.stringify({ stars, comment }) }),
   getDriverProfile: () => api.req("/me/driver-profile"),
   saveDriverProfile: (data) =>
     api.req("/me/driver-profile", { method: "PUT", body: JSON.stringify(data) }),
