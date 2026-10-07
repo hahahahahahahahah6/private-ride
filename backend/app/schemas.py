@@ -50,6 +50,22 @@ class PushTokenIn(BaseModel):
     push_token: str = Field(min_length=1, max_length=128)
 
 
+# ---------- driver profile ----------
+
+class DriverProfileIn(BaseModel):
+    vehicle_model: str = Field(default="", max_length=64)
+    plate: str = Field(default="", max_length=16)
+    seats: int = Field(default=6, ge=1, le=20)
+
+
+class DriverProfileOut(BaseModel):
+    vehicle_model: str = ""
+    plate: str = ""
+    seats: int = 6
+
+    model_config = {"from_attributes": True}
+
+
 # ---------- rides ----------
 
 RIDE_STATUSES = (
@@ -108,6 +124,8 @@ class RideOut(BaseModel):
     created_at: datetime
     # 乘客联系方式：仅乘客本人、接单司机、管理员可见
     passenger_contact: str | None = None
+    # 司机车辆：仅该单乘客、司机本人、管理员可见（进行中订单）
+    driver_vehicle: DriverProfileOut | None = None
     # 价格
     price_mode: str = "offer"
     price_offer_cents: int | None = None
