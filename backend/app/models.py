@@ -93,6 +93,10 @@ class Ride(Base):
     # unpaid=未付 / paid=已付 / failed=失败
     pay_status: Mapped[str] = mapped_column(String(16), default="unpaid")
     stripe_pi_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    # 评分：行程完成后乘客给司机打分
+    rating_stars: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    rating_comment: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    rated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
