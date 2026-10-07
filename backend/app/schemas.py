@@ -65,6 +65,8 @@ class DriverProfileOut(BaseModel):
     # 评分汇总（/me/driver-profile 接口填充）
     avg_rating: float | None = None
     rating_count: int = 0
+    # 乘客常选的标签 top3（如 ["开车稳", "很准时"]）
+    top_tags: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -107,6 +109,9 @@ class RideCreate(BaseModel):
     scheduled_at: datetime | None = None
     # 多经停：最多 3 个
     stops: list[str] = Field(default_factory=list, max_length=3)
+    # 代叫车：帮家人/朋友叫车
+    booked_for_name: str = Field(default="", max_length=64)
+    booked_for_phone: str = Field(default="", max_length=32)
     # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价
     price_mode: str = Field(default="offer", pattern="^(offer|mileage|quote)$")
     price_offer_cents: int | None = Field(default=None, ge=0)
@@ -126,6 +131,12 @@ class QuoteConfirmIn(BaseModel):
 class RatingIn(BaseModel):
     stars: int = Field(ge=1, le=5, description="1-5 星")
     comment: str = Field(default="", max_length=500)
+    # 评价标签，从预设里选（最多 3 个）
+    tags: list[str] = Field(default_factory=list, max_length=3, description="如：开车稳")
+
+
+# 预设评价标签
+RATING_TAGS = ["开车稳", "很准时", "车干净", "路线熟", "服务好"]
 
 
 class TipIn(BaseModel):
@@ -168,6 +179,13 @@ class RideOut(BaseModel):
     tip_cents: int | None = None
     # 经停点
     stops: list[str] = Field(default_factory=list)
+    # 代叫车：乘车人信息（所有可见该单的人都可见，方便司机接人）
+    booked_for_name: str = ""
+    booked_for_phone: str = ""
+    # 司机电话：仅该单乘客在进行中订单可见，方便联系司机
+    driver_phone: str | None = None
+    # 评价标签
+    rating_tags: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
