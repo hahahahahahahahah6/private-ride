@@ -1,10 +1,11 @@
 """private-ride backend: auth + users + rides + web static hosting."""
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
@@ -16,11 +17,13 @@ from sqlalchemy.orm import Session
 from . import auth
 from .auth import get_current_user, require_driver
 from .database import get_db, init_db
-from .models import Driver, InviteCode, Ride, User
+from .models import Driver, InviteCode, Ride, SavedPlace, ShareToken, User
 from .schemas import (
     DriverLocationOut,
     DriverProfileIn,
     DriverProfileOut,
+    DriverStatusOut,
+    EarningsOut,
     LocationIn,
     PushTokenIn,
     QuoteConfirmIn,
@@ -30,6 +33,11 @@ from .schemas import (
     RideCreate,
     RideOut,
     RideStatusIn,
+    SavedPlaceIn,
+    SavedPlaceOut,
+    ShareOut,
+    SharedRideOut,
+    TipIn,
     TokenOut,
     TRANSITIONS,
     UserCreate,
@@ -186,6 +194,11 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
         ride.passenger_contact = _format_contact(passenger)
     else:
         ride.passenger_contact = None
+    # 经停点：JSON 解析成列表
+    try:
+        ride.stops = json.loads(ride.stops_json) if ride.stops_json else []
+    except Exception:
+        ride.stops = []
     # 司机车辆信息只给该单乘客、司机本人、管理员看（进行中订单）
     ride.driver_vehicle = None
     if (
@@ -256,6 +269,7 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
             raise HTTPException(status_code=400, detail="里程计价请填写预估里程")
         final_cents = _mileage_price_cents(miles)
     # quote 模式：等司机报价，final 先空着
+    stops = [s.strip() for s in (payload.stops or []) if s.strip()][:3]
     ride = Ride(
         passenger_id=user.id,
         pickup_text=payload.pickup_text,
@@ -269,6 +283,7 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
         price_final_cents=final_cents,
         price_status="agreed" if final_cents is not None else "pending",
         pay_mode=payload.pay_mode,
+        stops_json=json.dumps(stops, ensure_ascii=False) if stops else None,
     )
     db.add(ride)
     db.commit()
@@ -385,6 +400,204 @@ def driver_location(ride_id: uuid.UUID,
     if (datetime.now(timezone.utc) - loc_at).total_seconds() > 600:
         return None
     return DriverLocationOut(lat=prof.last_lat, lng=prof.last_lng, updated_at=loc_at)
+
+
+class OnlineIn(BaseModel):
+    online: bool
+
+
+@app.post("/me/online")
+def set_online(payload: OnlineIn,
+               driver: User = Depends(require_driver),
+               db: Session = Depends(get_db)) -> dict:
+    """司机切换接单状态：在线才会收到新订单推送。"""
+    prof = db.get(Driver, driver.id)
+    if prof is None:
+        prof = Driver(user_id=driver.id)
+        db.add(prof)
+    prof.is_active = 1 if payload.online else 0
+    db.commit()
+    return {"ok": True, "online": payload.online}
+
+
+@app.get("/me/online")
+def get_online(driver: User = Depends(require_driver),
+               db: Session = Depends(get_db)) -> dict:
+    prof = db.get(Driver, driver.id)
+    return {"online": (prof.is_active == 1) if prof else True}
+
+
+@app.get("/drivers/status", response_model=list[DriverStatusOut])
+def drivers_status(user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)) -> list[DriverStatusOut]:
+    """乘客下单前看司机是否在线。"""
+    drivers = db.query(User).filter(User.role.in_(("driver", "admin"))).all()
+    profs = {d.user_id: d for d in db.query(Driver).all()} if drivers else {}
+    out = []
+    for d in drivers:
+        prof = profs.get(d.id)
+        out.append(DriverStatusOut(
+            name=d.name or d.phone,
+            vehicle_model=prof.vehicle_model if prof else "",
+            is_active=(prof.is_active == 1) if prof else True,
+        ))
+    return out
+
+
+@app.get("/me/earnings", response_model=EarningsOut)
+def my_earnings(days: int = Query(default=30, ge=1, le=365),
+                driver: User = Depends(require_driver),
+                db: Session = Depends(get_db)) -> EarningsOut:
+    """司机收入统计：近 N 天已完成订单的车费 + 小费。"""
+    from sqlalchemy import func
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rides = (
+        db.query(Ride)
+        .filter(Ride.driver_id == driver.id,
+                Ride.status == "completed",
+                Ride.created_at >= since)
+        .all()
+    )
+    fare = sum(r.price_final_cents or 0 for r in rides)
+    tips = sum(r.tip_cents or 0 for r in rides)
+    ratings = [r.rating_stars for r in rides if r.rating_stars]
+    return EarningsOut(
+        days=days,
+        completed_count=len(rides),
+        fare_cents=fare,
+        tip_cents=tips,
+        total_cents=fare + tips,
+        avg_rating=round(sum(ratings) / len(ratings), 1) if ratings else None,
+    )
+
+
+# ---------- 常用地址 ----------
+
+@app.get("/me/places", response_model=list[SavedPlaceOut])
+def list_places(user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)) -> list[SavedPlace]:
+    return (
+        db.query(SavedPlace)
+        .filter(SavedPlace.user_id == user.id)
+        .order_by(SavedPlace.created_at.asc())
+        .all()
+    )
+
+
+@app.post("/me/places", response_model=SavedPlaceOut, status_code=201)
+def add_place(payload: SavedPlaceIn,
+              user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)) -> SavedPlace:
+    count = db.query(SavedPlace).filter(SavedPlace.user_id == user.id).count()
+    if count >= 20:
+        raise HTTPException(status_code=400, detail="常用地址最多 20 个")
+    place = SavedPlace(user_id=user.id, label=payload.label.strip(),
+                       address_text=payload.address_text.strip())
+    db.add(place)
+    db.commit()
+    db.refresh(place)
+    return place
+
+
+@app.delete("/me/places/{place_id}")
+def delete_place(place_id: uuid.UUID,
+                 user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)) -> dict:
+    place = db.get(SavedPlace, place_id)
+    if place is None or place.user_id != user.id:
+        raise HTTPException(status_code=404, detail="地址不存在")
+    db.delete(place)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------- 行程分享 ----------
+
+def _share_ride_out(ride: Ride, db: Session) -> SharedRideOut:
+    """公开分享页数据：不含乘客联系方式等隐私信息。"""
+    out = SharedRideOut(
+        status=ride.status,
+        pickup_text=ride.pickup_text,
+        dropoff_text=ride.dropoff_text,
+        scheduled_at=ride.scheduled_at,
+    )
+    try:
+        out.stops = json.loads(ride.stops_json) if ride.stops_json else []
+    except Exception:
+        out.stops = []
+    if ride.driver_id is not None:
+        prof = db.get(Driver, ride.driver_id)
+        if prof:
+            out.vehicle_model = prof.vehicle_model or ""
+            out.plate = prof.plate or ""
+            if (ride.status in ("accepted", "en_route", "arrived", "in_progress")
+                    and prof.last_lat is not None and prof.last_lng is not None
+                    and prof.last_loc_at is not None):
+                loc_at = prof.last_loc_at
+                if loc_at.tzinfo is None:
+                    loc_at = loc_at.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - loc_at).total_seconds() <= 600:
+                    out.driver_lat = prof.last_lat
+                    out.driver_lng = prof.last_lng
+                    out.location_updated_at = loc_at
+    return out
+
+
+@app.post("/rides/{ride_id}/share", response_model=ShareOut)
+def share_ride(ride_id: uuid.UUID,
+               user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)) -> dict:
+    """生成行程分享链接（7 天有效），发给家人可看司机位置和状态。"""
+    import secrets
+
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if not (user.role == "admin"
+            or ride.passenger_id == user.id
+            or ride.driver_id == user.id):
+        raise HTTPException(status_code=403, detail="无权分享此订单")
+    token = secrets.token_urlsafe(24)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    db.add(ShareToken(token=token, ride_id=ride.id,
+                      created_by=user.id, expires_at=expires_at))
+    db.commit()
+    return {"url": f"/web/track.html?t={token}", "expires_at": expires_at}
+
+
+@app.delete("/rides/{ride_id}/share")
+def unshare_ride(ride_id: uuid.UUID,
+                 user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)) -> dict:
+    """撤销该订单的所有分享链接。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if not (user.role == "admin"
+            or ride.passenger_id == user.id
+            or ride.driver_id == user.id):
+        raise HTTPException(status_code=403, detail="无权操作")
+    db.query(ShareToken).filter(ShareToken.ride_id == ride.id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/share/{token}", response_model=SharedRideOut)
+def get_shared_ride(token: str, db: Session = Depends(get_db)) -> SharedRideOut:
+    """公开接口：凭分享链接查看行程状态（无需登录）。"""
+    share = db.get(ShareToken, token)
+    if share is None:
+        raise HTTPException(status_code=404, detail="分享链接不存在或已撤销")
+    exp = share.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="分享链接已过期")
+    ride = db.get(Ride, share.ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return _share_ride_out(ride, db)
 
 
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
@@ -531,6 +744,27 @@ def rate_ride(ride_id: uuid.UUID, payload: RatingIn,
     ride.rating_stars = payload.stars
     ride.rating_comment = payload.comment.strip() or None
     ride.rated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(ride)
+    return _ride_out(ride, db, user)
+
+
+@app.post("/rides/{ride_id}/tip", response_model=RideOut)
+def tip_ride(ride_id: uuid.UUID, payload: TipIn,
+             user: User = Depends(get_current_user),
+             db: Session = Depends(get_db)) -> Ride:
+    """行程完成后，乘客给小费。只能加一次。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if ride.passenger_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="只有乘客能给小费")
+    if ride.status != "completed":
+        raise HTTPException(status_code=400, detail="行程完成后才能给小费")
+    if ride.tip_cents is not None:
+        raise HTTPException(status_code=409, detail="已经给过小费了")
+    ride.tip_cents = payload.tip_cents
+    ride.tip_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(ride)
     return _ride_out(ride, db, user)
