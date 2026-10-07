@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>司机 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261004c" />
+<link rel="stylesheet" href="styles.css?v=20261006a" />
 </head>
 <body>
 <div class="wrap">
@@ -31,13 +31,30 @@
   </div>
 
   <div id="main" style="display:none">
+    <div class="card">
+      <div class="card_h">我的车辆</div>
+      <div class="row">
+        <div style="flex:2">
+          <label class="f" for="v-model">车型</label>
+          <input id="v-model" placeholder="例如：Toyota Sienna" maxlength="64" />
+        </div>
+        <div style="flex:1">
+          <label class="f" for="v-seats">座位数</label>
+          <input id="v-seats" type="number" min="1" max="20" value="6" />
+        </div>
+      </div>
+      <label class="f" for="v-plate">车牌</label>
+      <input id="v-plate" placeholder="例如：8ABC123" maxlength="16" style="text-transform:uppercase" />
+      <div class="actions"><button class="small primary" id="btn-save-vehicle">保存车辆信息</button></div>
+      <p class="hint" id="vehicle-msg"></p>
+    </div>
     <div class="sec"><h3>待接订单</h3><span class="count" id="open-count"></span></div>
     <div id="open"></div>
     <div class="sec"><h3>我的行程</h3><span class="count" id="mine-count"></span></div>
     <div id="mine"></div>
   </div>
 </div>
-<script src="app.js?v=20261004c"></script>
+<script src="app.js?v=20261006a"></script>
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -147,6 +164,7 @@
       if (me.role === "driver" || me.role === "admin") {
         $("invite").style.display = "none";
         $("main").style.display = "";
+        loadVehicle();
         refresh();
       } else {
         $("main").style.display = "none";
@@ -156,6 +174,30 @@
       $("invite").style.display = "none";
     }
   }
+
+  async function loadVehicle() {
+    try {
+      const p = await api.getDriverProfile();
+      $("v-model").value = p.vehicle_model || "";
+      $("v-plate").value = p.plate || "";
+      $("v-seats").value = p.seats || 6;
+    } catch (e) { /* 没填过就空着 */ }
+  }
+
+  $("btn-save-vehicle").onclick = async () => {
+    const msg = $("vehicle-msg");
+    const data = {
+      vehicle_model: $("v-model").value.trim(),
+      plate: $("v-plate").value.trim(),
+      seats: parseInt($("v-seats").value) || 6,
+    };
+    if (!data.vehicle_model && !data.plate) { msg.textContent = "请至少填写车型或车牌"; return; }
+    msg.textContent = "保存中…";
+    try {
+      await api.saveDriverProfile(data);
+      msg.textContent = "✓ 已保存，乘客在进行中的订单里能看到你的车";
+    } catch (e) { msg.textContent = e.message; }
+  };
 
   ensureSession($("login"), $("main"), () => checkRoleAndShow());
   setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
