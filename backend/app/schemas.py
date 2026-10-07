@@ -62,6 +62,9 @@ class DriverProfileOut(BaseModel):
     vehicle_model: str = ""
     plate: str = ""
     seats: int = 6
+    # 评分汇总（/me/driver-profile 接口填充）
+    avg_rating: float | None = None
+    rating_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -118,6 +121,11 @@ class QuoteConfirmIn(BaseModel):
     accept: bool = Field(description="乘客是否接受报价")
 
 
+class RatingIn(BaseModel):
+    stars: int = Field(ge=1, le=5, description="1-5 星")
+    comment: str = Field(default="", max_length=500)
+
+
 class RideStatusIn(BaseModel):
     status: str = Field(pattern="^(accepted|en_route|arrived|in_progress|completed|cancelled)$")
 
@@ -147,5 +155,8 @@ class RideOut(BaseModel):
     # 付款
     pay_mode: str = "offline"
     pay_status: str = "unpaid"
+    # 评分（行程完成后乘客打分）
+    rating_stars: int | None = None
+    rating_comment: str | None = None
 
     model_config = {"from_attributes": True}
