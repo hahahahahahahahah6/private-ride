@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -31,7 +32,14 @@ from .schemas import (
     VerifyIn,
 )
 
-app = FastAPI(title="private-ride API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="private-ride API", version="0.1.0", lifespan=lifespan)
 
 log = logging.getLogger(__name__)
 
@@ -44,11 +52,6 @@ def _mileage_price_cents(miles: float) -> int:
     return MILEAGE_BASE_CENTS + round(MILEAGE_PER_MILE_CENTS * miles)
 
 WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
 
 
 # ---------- meta ----------
@@ -135,8 +138,7 @@ def set_user_role(user_id: uuid.UUID, payload: RoleIn,
 
 # ---------- rides ----------
 
-def _passenger_contact(db: Session, ride: Ride) -> str | None:
-    passenger = db.get(User, ride.passenger_id)
+def _format_contact(passenger: User | None) -> str | None:
     if passenger is None:
         return None
     phone = passenger.phone if not passenger.phone.startswith("email:") else None
@@ -145,9 +147,11 @@ def _passenger_contact(db: Session, ride: Ride) -> str | None:
     return phone
 
 
-def _ride_out(ride: Ride, db: Session, viewer: User | None = None) -> Ride:
+def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
+              pmap: dict | None = None) -> Ride:
     # 乘客联系方式只给相关人看：乘客本人、接单司机、管理员
     # 待接单列表里不暴露；已完成/已取消的订单不再显示（隐私）
+    # pmap：批量预加载的 passenger 映射，避免列表页 N+1 查询
     if (
         viewer is not None
         and ride.status not in ("completed", "cancelled")
@@ -157,14 +161,46 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None) -> Ride:
             or ride.driver_id == viewer.id
         )
     ):
-        ride.passenger_contact = _passenger_contact(db, ride)
+        passenger = pmap.get(ride.passenger_id) if pmap is not None else db.get(User, ride.passenger_id)
+        ride.passenger_contact = _format_contact(passenger)
     else:
         ride.passenger_contact = None
     return ride
 
 
+def _notify_new_ride_bg(ride_id: uuid.UUID) -> None:
+    """后台发新订单通知（Expo push + 邮件），用独立 session，不阻塞下单响应。"""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        ride = db.get(Ride, ride_id)
+        if ride is None:
+            return
+        try:
+            from . import push as push_mod
+
+            push_mod.notify_drivers_of_new_ride(db, ride)
+        except Exception:
+            log.warning("bg push failed for ride %s", ride_id, exc_info=True)
+        try:
+            from . import notify as notify_mod
+
+            price_label = (
+                f"${ride.price_final_cents / 100:.2f}"
+                if ride.price_final_cents else "待定"
+            )
+            notify_mod.notify_driver_new_ride(
+                ride.pickup_text, ride.dropoff_text, price_label, None)
+        except Exception:
+            log.warning("bg email failed for ride %s", ride_id, exc_info=True)
+    finally:
+        db.close()
+
+
 @app.post("/rides", response_model=RideOut, status_code=201)
-def create_ride(payload: RideCreate, user: User = Depends(get_current_user),
+def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
+                user: User = Depends(get_current_user),
                 db: Session = Depends(get_db)) -> Ride:
     # 按计价方式校验必填项并算出初始成交价
     offer_cents = payload.price_offer_cents
@@ -196,36 +232,23 @@ def create_ride(payload: RideCreate, user: User = Depends(get_current_user),
     db.add(ride)
     db.commit()
     db.refresh(ride)
-    # 推送给司机：失败不影响下单（push 模块内部已吞异常）
-    try:
-        from . import push as push_mod
-
-        push_mod.notify_drivers_of_new_ride(db, ride)
-    except Exception:
-        pass
-    # 邮件通知司机有新单
-    try:
-        from . import notify as notify_mod
-
-        notify_mod.notify_driver_new_ride(
-            ride.pickup_text, ride.dropoff_text,
-            f"${(ride.price_final_cents or 0) / 100:.2f}" if ride.price_final_cents else "待定",
-            None,
-        )
-    except Exception:
-        pass
+    # 新订单通知走后台任务：Expo push 最长 8s、邮件最长 20s，不能阻塞下单响应
+    background_tasks.add_task(_notify_new_ride_bg, ride.id)
     return _ride_out(ride, db, user)
 
 
 @app.get("/rides", response_model=list[RideOut])
 def list_rides(mine: bool = Query(default=True), open: bool = Query(default=False),
+               limit: int = Query(default=50, ge=1, le=200),
+               offset: int = Query(default=0, ge=0),
                user: User = Depends(get_current_user),
                db: Session = Depends(get_db)) -> list[Ride]:
     q = db.query(Ride).order_by(Ride.created_at.desc())
     if open:
         if user.role not in ("driver", "admin"):
             raise HTTPException(status_code=403, detail="仅司机可查看待接单")
-        return [_ride_out(r, db, user) for r in q.filter_by(status="requested").all()]
+        rides = q.filter_by(status="requested").limit(limit).offset(offset).all()
+        return [_ride_out(r, db, user) for r in rides]
     if mine:
         if user.role in ("driver", "admin"):
             # 司机视角：按预约时间正序（临近的在前），无预约时间的沉底
@@ -233,7 +256,13 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
                 None).order_by(Ride.scheduled_at.is_(None), Ride.scheduled_at.asc())
         else:
             q = q.filter(Ride.passenger_id == user.id)
-    return [_ride_out(r, db, user) for r in q.all()]
+    rides = q.limit(limit).offset(offset).all()
+    # 批量预加载乘客，避免每单一次查询（N+1）
+    pmap = None
+    if rides:
+        pax_ids = {r.passenger_id for r in rides}
+        pmap = {u.id: u for u in db.query(User).filter(User.id.in_(pax_ids)).all()}
+    return [_ride_out(r, db, user, pmap) for r in rides]
 
 
 @app.post("/rides/{ride_id}/accept", response_model=RideOut)
@@ -559,6 +588,11 @@ def redeem_invite(payload: InviteRedeemIn,
         raise HTTPException(status_code=429, detail="尝试太频繁，请一小时后再试")
     attempts.append(now)
     _redeem_attempts[key] = attempts
+    # 防止长期运行内存膨胀：key 太多时丢掉最久没动过的
+    if len(_redeem_attempts) > 2000:
+        for k in sorted(_redeem_attempts,
+                        key=lambda k: _redeem_attempts[k][-1] if _redeem_attempts[k] else 0)[:1000]:
+            del _redeem_attempts[k]
 
     code = payload.code.strip().upper()
     inv = db.get(InviteCode, code)
