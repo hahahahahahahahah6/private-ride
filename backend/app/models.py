@@ -97,6 +97,11 @@ class Ride(Base):
     rating_stars: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     rating_comment: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     rated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    # 小费（分）：行程完成后乘客可加，只能加一次
+    tip_cents: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    tip_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    # 多经停：JSON 数组 ["地址1", "地址2"]，最多 3 个
+    stops_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -117,4 +122,25 @@ class InviteCode(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     used_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class SavedPlace(Base):
+    """常用地址：乘客保存的上车/下车地点。"""
+    __tablename__ = "saved_places"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
+    label: Mapped[str] = mapped_column(String(32), default="")
+    address_text: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShareToken(Base):
+    """行程分享链接 token：公开查询行程状态用，不含乘客隐私信息。"""
+    __tablename__ = "share_tokens"
+
+    token: Mapped[str] = mapped_column(String(32), primary_key=True)
+    ride_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("rides.id"), index=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
