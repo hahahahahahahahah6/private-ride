@@ -47,3 +47,12 @@ def init_db() -> None:
 
     with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_driver_id ON rides (driver_id)"))
+        # 老库补列：drivers 表加实时位置字段
+        from sqlalchemy import inspect
+
+        cols = {c["name"] for c in inspect(conn).get_columns("drivers")}
+        for col in ("last_lat", "last_lng"):
+            if col not in cols:
+                conn.execute(text(f"ALTER TABLE drivers ADD COLUMN {col} FLOAT"))
+        if "last_loc_at" not in cols:
+            conn.execute(text("ALTER TABLE drivers ADD COLUMN last_loc_at TIMESTAMP"))
