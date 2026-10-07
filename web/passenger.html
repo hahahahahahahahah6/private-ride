@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>乘客 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006c" />
+<link rel="stylesheet" href="styles.css?v=20261006d" />
 </head>
 <body>
 <div class="wrap">
@@ -21,10 +21,13 @@
   <div id="main" style="display:none">
     <div class="card">
       <div class="card_h">叫车</div>
+      <p class="hint" id="driver-status-line">正在查看司机状态…</p>
       <label class="f" for="pickup">上车地点</label>
       <input id="pickup" placeholder="例如：家里小区门口" />
       <label class="f" for="dropoff">下车地点</label>
       <input id="dropoff" placeholder="例如：罗兰岗大华超市" />
+      <div id="stops-wrap"></div>
+      <button type="button" class="secondary small" id="btn-add-stop" style="margin-bottom:10px">＋ 经停点（最多 3 个）</button>
       <div class="row">
         <div style="flex:1">
           <label class="f" for="seats">人数</label>
@@ -72,14 +75,56 @@
       <p class="hint" id="book-msg"></p>
     </div>
 
+    <div class="card">
+      <div class="card_h">常用地址</div>
+      <div id="places"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="place-label" placeholder="名称，如：家" style="flex:1" maxlength="32" />
+        <input id="place-addr" placeholder="地址" style="flex:2" maxlength="500" />
+        <button class="small primary" id="btn-add-place">保存</button>
+      </div>
+      <p class="hint" id="place-msg"></p>
+    </div>
+
     <div class="sec"><h3>我的订单</h3><span class="count" id="rides-count"></span></div>
     <div id="rides"></div>
   </div>
 </div>
-<script src="app.js?v=20261006c"></script>
+<script src="app.js?v=20261006d"></script>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const $ = (id) => document.getElementById(id);
+
+  // ---- 司机在线状态 ----
+  async function loadDriverStatus() {
+    const el = $("driver-status-line");
+    try {
+      const ds = await api.req("/drivers/status");
+      if (!ds.length) { el.textContent = "暂无司机信息"; return; }
+      el.innerHTML = ds.map((d) =>
+        `${d.is_active ? "🟢" : "🔴"} ${esc(d.name)}${d.vehicle_model ? `（${esc(d.vehicle_model)}）` : ""} ${d.is_active ? "在线" : "休息中"}`
+      ).join("<br />");
+    } catch (e) { el.textContent = ""; }
+  }
+
+  // ---- 经停点 ----
+  function addStopInput(value = "") {
+    const wrap = $("stops-wrap");
+    const n = wrap.querySelectorAll("input").length;
+    if (n >= 3) return;
+    const inp = document.createElement("input");
+    inp.placeholder = `经停点 ${n + 1}（可选）`;
+    inp.maxLength = 500;
+    inp.value = value;
+    inp.style.marginBottom = "10px";
+    wrap.appendChild(inp);
+    if (wrap.querySelectorAll("input").length >= 3) $("btn-add-stop").style.display = "none";
+  }
+  $("btn-add-stop").onclick = () => addStopInput();
+  function getStops() {
+    return [...$("stops-wrap").querySelectorAll("input")]
+      .map((i) => i.value.trim()).filter(Boolean).slice(0, 3);
+  }
 
   // ---- 付款方式 ----
   let payMode = "offline";
@@ -181,11 +226,27 @@
         <button class="small secondary" onclick="rejectQuoteUI('${r.id}')">拒绝</button>
       </div>`;
     }
+    // 小费：已完成未给过显示快捷按钮
+    let tipHtml = "";
+    if (r.status === "completed") {
+      tipHtml = r.tip_cents != null
+        ? `<div class="meta">💰 已给小费 $${(r.tip_cents / 100).toFixed(2)}</div>`
+        : `<div class="meta" id="tipwrap-${r.id}">给小费：
+            ${[3, 5, 10].map((d) => `<button class="small secondary" style="padding:2px 8px" onclick="tipRide('${r.id}',${d * 100})">$${d}</button>`).join(" ")}
+            <button class="small secondary" style="padding:2px 8px" onclick="tipCustom('${r.id}')">其他</button>
+          </div>`;
+    }
+    // 分享：进行中订单可生成分享链接
+    const shareHtml = ["accepted", "en_route", "arrived", "in_progress"].includes(r.status)
+      ? `<div class="actions"><button class="small secondary" onclick="shareRide('${r.id}')">🔗 分享行程给家人</button></div>` : "";
+    const stopsHtml = (r.stops && r.stops.length)
+      ? `<div class="meta">📍 经停：${r.stops.map(esc).join(" → ")}</div>` : "";
     return `<div class="card">
       <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
       <span class="time">${when}</span></div>
       <div class="route"><span class="route-line"></span><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
+      ${stopsHtml}
       <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
@@ -196,9 +257,32 @@
       ${r.status === "completed" ? (r.rating_stars
         ? `<div class="meta">⭐ 你给了 ${r.rating_stars} 星${r.rating_comment ? " · " + esc(r.rating_comment) : ""}</div>`
         : `<div class="meta">给司机打分：${[1, 2, 3, 4, 5].map((s) => `<button class="small secondary" style="padding:2px 8px" onclick="rateRide('${r.id}',${s})">⭐${s}</button>`).join(" ")}</div>`) : ""}
+      ${tipHtml}
+      ${shareHtml}
       ${actionsHtml}
       ${quoteHtml}
     </div>`;
+  }
+
+  async function tipRide(id, cents) {
+    if (!confirm(`给 $${(cents / 100).toFixed(2)} 小费？`)) return;
+    try { await api.req(`/rides/${id}/tip`, { method: "POST", body: JSON.stringify({ tip_cents: cents }) }); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+  async function tipCustom(id) {
+    const v = prompt("小费金额（美元，至少 $1）：");
+    if (v == null) return;
+    const cents = Math.round(parseFloat(v) * 100);
+    if (!(cents >= 100)) { alert("至少 $1"); return; }
+    tipRide(id, cents);
+  }
+  async function shareRide(id) {
+    try {
+      const r = await api.req(`/rides/${id}/share`, { method: "POST" });
+      const url = location.origin + r.url;
+      if (navigator.clipboard) await navigator.clipboard.writeText(url);
+      alert(`分享链接已复制（7 天有效）：\n${url}`);
+    } catch (e) { alert(e.message); }
   }
 
   async function refreshDriverLoc(id, pickupText) {
@@ -213,6 +297,44 @@
       el.innerHTML = `📍 司机位置（${when}更新）· <a href="${mapsUrl}" target="_blank">看路线和预计到达时间</a>`;
     } catch (e) { el.textContent = ""; }
   }
+
+  // ---- 常用地址 ----
+  async function loadPlaces() {
+    const wrap = $("places");
+    try {
+      const ps = await api.req("/me/places");
+      wrap.innerHTML = ps.length
+        ? ps.map((p) => `<div class="row" style="align-items:center;margin-bottom:6px">
+            <span style="flex:1">📍 <b>${esc(p.label)}</b> · ${esc(p.address_text)}</span>
+            <button class="small secondary" onclick="usePlace('pickup','${p.id}')">设为上车点</button>
+            <button class="small secondary" onclick="usePlace('dropoff','${p.id}')">设为下车点</button>
+            <button class="small danger" onclick="delPlace('${p.id}')">删</button>
+          </div>`).join("")
+        : '<p class="hint">还没有常用地址，在下面添加（如：家、面馆）。</p>';
+      wrap._data = ps;
+    } catch (e) { wrap.innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+  }
+  function usePlace(field, id) {
+    const p = ($("places")._data || []).find((x) => x.id === id);
+    if (p) $(field === "pickup" ? "pickup" : "dropoff").value = p.address_text;
+  }
+  async function delPlace(id) {
+    if (!confirm("删除这个常用地址？")) return;
+    try { await api.req(`/me/places/${id}`, { method: "DELETE" }); loadPlaces(); }
+    catch (e) { alert(e.message); }
+  }
+  $("btn-add-place").onclick = async () => {
+    const msg = $("place-msg");
+    const label = $("place-label").value.trim();
+    const address_text = $("place-addr").value.trim();
+    if (!label || !address_text) { msg.textContent = "请填写名称和地址"; return; }
+    try {
+      await api.req("/me/places", { method: "POST", body: JSON.stringify({ label, address_text }) });
+      $("place-label").value = $("place-addr").value = "";
+      msg.textContent = "";
+      loadPlaces();
+    } catch (e) { msg.textContent = e.message; }
+  };
 
   async function refresh() {
     try {
@@ -258,6 +380,7 @@
       scheduled_at: when ? new Date(when).toISOString() : null,
       price_mode: priceMode,
       pay_mode: payMode,
+      stops: getStops(),
     };
     if (priceMode === "offer") {
       const dollars = parseFloat($("price-offer").value);
@@ -278,7 +401,7 @@
     } catch (e) { msg.classList.remove("ok"); msg.textContent = e.message; }
   };
 
-  ensureSession($("login"), $("main"), () => refresh());
+  ensureSession($("login"), $("main"), () => { refresh(); loadPlaces(); loadDriverStatus(); });
   setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
 </script>
 </body>
