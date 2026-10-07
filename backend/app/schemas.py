@@ -66,6 +66,17 @@ class DriverProfileOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LocationIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class DriverLocationOut(BaseModel):
+    lat: float
+    lng: float
+    updated_at: datetime
+
+
 # ---------- rides ----------
 
 RIDE_STATUSES = (
