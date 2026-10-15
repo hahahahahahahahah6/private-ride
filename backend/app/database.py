@@ -80,10 +80,19 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN rating_tags_json TEXT"))
         if "reminder_sent" not in ride_cols:
             conn.execute(text("ALTER TABLE rides ADD COLUMN reminder_sent INTEGER DEFAULT 0"))
+        # 老库补列：rides 表加包车每小时价格字段
+        if "hourly_rate_cents" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN hourly_rate_cents INTEGER"))
+        # 老库补列：rides 表加航班号字段（机场接送）
+        if "flight_no" not in ride_cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN flight_no VARCHAR(16) DEFAULT ''"))
         # 老库补列：users 表加语言字段（通知文案用）
         user_cols = {c["name"] for c in inspect(conn).get_columns("users")}
         if "lang" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN lang VARCHAR(8) DEFAULT 'zh'"))
+        # 老库补表：司机熟客便签（create_all 已处理新库；这里显式保证老库也幂等建表）
+        if "passenger_notes" not in inspect(conn).get_table_names():
+            models.PassengerNote.__table__.create(bind=conn)
         # 老库结构变更：rides.passenger_id 改为可空
         # （账号注销时订单要匿名化：关联置空但订单保留给司机对账）
         col_nullable = {

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import CHAR, TypeDecorator
@@ -80,14 +80,18 @@ class Ride(Base):
     dropoff_text: Mapped[str] = mapped_column(Text, default="")
     seats_needed: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str] = mapped_column(Text, default="")
+    # 航班号：机场接送时填（如 UA857，去空格转大写，最长 16）
+    flight_no: Mapped[str] = mapped_column(String(16), default="")
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # requested → accepted → en_route → arrived → in_progress → completed | cancelled
     status: Mapped[str] = mapped_column(String(16), default="requested", index=True)
-    # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价
+    # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价 / hourly=包车按小时
     price_mode: Mapped[str] = mapped_column(String(16), default="offer")
     price_offer_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_miles: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_quote_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 包车按小时：每小时价格（分），行程结束时按实际小时数结算（0.5 小时向上取整）
+    hourly_rate_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_final_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # pending=待确认 / agreed=已确认 / rejected=已拒绝
     price_status: Mapped[str] = mapped_column(String(16), default="pending")
@@ -154,3 +158,22 @@ class ShareToken(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PassengerNote(Base):
+    """司机熟客便签：司机给常接的乘客记偏好（如“张阿姨晕车开慢点”），仅司机本人可见。"""
+    __tablename__ = "passenger_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    driver_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
+    passenger_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("driver_id", "passenger_id", name="uq_passenger_notes_driver_passenger"),
+    )

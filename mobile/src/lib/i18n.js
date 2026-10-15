@@ -34,12 +34,37 @@ const STRINGS = {
     "driver.note": "备注：{note}",
     "driver.accept": "接单",
 
+    "price.hourly": "包车 {p}/小时",
+    "price.hourly_done": "包车结算 {p}",
+
     "passenger.title": "乘客端",
     "passenger.subtitle": "约车 / 看订单状态（M2 接入）",
     "passenger.backendOk": "后端连接正常 ✅ {service}",
     "passenger.backendFail": "后端连不上：{error}",
 
     "push.channelName": "订单通知",
+
+    "flight.label": "航班号（可选）",
+    "flight.ph": "UA 857",
+    "flight.hint": "机场接送可填；落地发现晚点，可直接在订单里延后预约时间。",
+    "flight.show": "✈️ 航班：",
+    "flight.delay": "✈️ 航班晚点",
+    "flight.delay_unit": "分钟",
+    "flight.delay_q": "航班晚点 {m} 分钟，预约时间延后 {m} 分钟？",
+    "flight.delayed_ok": "✓ 已延后 {m} 分钟，司机已收到通知",
+
+    "rebook.btn": "🔁 再来一单",
+    "rebook.confirm": "用相同的线路和价格再来一单？",
+    "rebook.ok": "✓ 已重新下单（现在用车），新订单在列表最上方",
+
+    "notes.title": "📝 熟客便签",
+    "notes.add": "添加便签",
+    "notes.save": "保存",
+    "notes.saving": "保存中…",
+    "notes.saved": "✓ 已保存",
+    "notes.deleted": "✓ 已删除",
+    "notes.ph": "如：张阿姨晕车，开慢点；李叔爱听戏曲",
+    "notes.clear_hint": "清空后保存即删除这条便签",
   },
   en: {
     "app.title": "Private Ride",
@@ -63,12 +88,37 @@ const STRINGS = {
     "driver.note": "Note: {note}",
     "driver.accept": "Accept",
 
+    "price.hourly": "Charter {p}/hour",
+    "price.hourly_done": "Charter {p}",
+
     "passenger.title": "Passenger",
     "passenger.subtitle": "Book rides & check status (M2 coming soon)",
     "passenger.backendOk": "Server connected ✅ {service}",
     "passenger.backendFail": "Can't reach the server: {error}",
 
     "push.channelName": "Ride notifications",
+
+    "flight.label": "Flight number (optional)",
+    "flight.ph": "UA 857",
+    "flight.hint": "For airport rides — if your flight is late, push the pickup time back right from the order.",
+    "flight.show": "✈️ Flight: ",
+    "flight.delay": "✈️ Flight delayed",
+    "flight.delay_unit": "min",
+    "flight.delay_q": "Flight delayed {m} min — push pickup time back {m} min?",
+    "flight.delayed_ok": "✓ Pushed back {m} min — driver notified",
+
+    "rebook.btn": "🔁 Book again",
+    "rebook.confirm": "Book the same route and price again?",
+    "rebook.ok": "✓ Rebooked (ride now) — the new order is at the top",
+
+    "notes.title": "📝 Rider notes",
+    "notes.add": "Add note",
+    "notes.save": "Save",
+    "notes.saving": "Saving…",
+    "notes.saved": "✓ Saved",
+    "notes.deleted": "✓ Deleted",
+    "notes.ph": "e.g. Mrs. Zhang gets carsick — drive slowly; Mr. Li loves opera",
+    "notes.clear_hint": "Save empty to delete this note",
   },
 };
 

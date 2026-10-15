@@ -43,8 +43,12 @@ const api = {
   cancelRide: (id) => api.req(`/rides/${id}/cancel`, { method: "POST" }),
   quoteRide: (id, cents) =>
     api.req(`/rides/${id}/quote`, { method: "POST", body: JSON.stringify({ price_quote_cents: cents }) }),
+  finishHourly: (id, hours) =>
+    api.req(`/rides/${id}/finish-hourly`, { method: "POST", body: JSON.stringify({ hours }) }),
   confirmQuote: (id, accept) =>
     api.req(`/rides/${id}/quote/confirm`, { method: "POST", body: JSON.stringify({ accept }) }),
+  delayRide: (id, minutes) =>
+    api.req(`/rides/${id}/delay`, { method: "POST", body: JSON.stringify({ minutes }) }),
   rateRide: (id, stars, comment = "") =>
     api.req(`/rides/${id}/rate`, { method: "POST", body: JSON.stringify({ stars, comment }) }),
   getDriverProfile: () => api.req("/me/driver-profile"),
@@ -64,6 +68,11 @@ function priceLabel(r) {
     if (r.price_status === "agreed") return t("price.quoted_agreed", { p: fmtPrice(r.price_final_cents) });
     if (r.price_quote_cents != null) return t("price.quoted_pending", { p: fmtPrice(r.price_quote_cents) });
     return t("price.waiting_quote");
+  }
+  if (r.price_mode === "hourly") {
+    // 已结算显示最终价，未结算显示每小时单价
+    if (r.price_final_cents != null) return t("price.hourly_done", { p: fmtPrice(r.price_final_cents) });
+    return t("price.hourly", { p: fmtPrice(r.hourly_rate_cents) });
   }
   return "";
 }

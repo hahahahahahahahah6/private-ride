@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title data-i18n="meta.title.driver">司机 · 私人专车</title>
 <link rel="stylesheet" href="styles.css?v=20261014a" />
+<style>
+  /* 熟客便签：卡片底部可折叠编辑区 */
+  .note-box { margin-top: 8px; border-top: 1px dashed var(--faint); padding-top: 6px; }
+  .note-box summary { cursor: pointer; font-size: 14px; color: var(--text); list-style: none; }
+  .note-box summary::-webkit-details-marker { display: none; }
+  .note-box summary::before { content: "▸ "; color: var(--gold); }
+  .note-box[open] summary::before { content: "▾ "; color: var(--gold); }
+  .note-box .note-add { color: var(--blue); }
+  .note-box .note-prev { color: var(--muted); }
+  .note-box textarea { width: 100%; min-height: 54px; margin-top: 6px; }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -109,13 +120,66 @@
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       ${stops}
       <div class="meta"><b>${riders(r.seats_needed)}</b>${r.note ? " · " + esc(r.note) : ""}</div>
+      ${r.flight_no ? `<div class="meta">${t("flight.show")}${esc(r.flight_no)}</div>` : ""}
       ${r.booked_for_name ? `<div class="meta">${t("p.booked_for")}${esc(r.booked_for_name)}${r.booked_for_phone ? " · " + esc(r.booked_for_phone) : ""}</div>` : ""}
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
       ${r.passenger_contact ? `<div class="meta">${t("d.passenger")}${contactLinks(r.passenger_contact)}</div>` : ""}
       <div class="meta">🗺️ <a href="${navUrl}" target="_blank">${navLabel}</a></div>
+      ${noteHtml(r)}
       ${actionsHtml}
     </div>`;
+  }
+
+  // ---- 熟客便签：可折叠编辑区（显示乘客名+便签，没有就显示"添加便签"） ----
+  let _notesByPid = {};
+  async function loadNotes() {
+    try {
+      const list = await api.req("/drivers/notes");
+      _notesByPid = {};
+      (list || []).forEach((n) => { _notesByPid[n.passenger_id] = n; });
+    } catch (e) { _notesByPid = {}; }
+  }
+
+  function noteHtml(r) {
+    if (!r.passenger_id) return "";
+    const pid = r.passenger_id;
+    const saved = _notesByPid[pid];
+    const has = !!(saved && saved.note);
+    const preview = has
+      ? `<span class="note-prev">${esc((saved.passenger_name ? saved.passenger_name + "：" : "") +
+          (saved.note.length > 26 ? saved.note.slice(0, 26) + "…" : saved.note))}</span>`
+      : `<span class="note-add">${t("notes.add")}</span>`;
+    return `<details class="note-box">
+      <summary><span>${t("notes.title")}</span> ${preview}</summary>
+      <div class="note-edit">
+        <textarea id="note-${pid}" maxlength="1000" placeholder="${esc(t("notes.ph"))}">${has ? esc(saved.note) : ""}</textarea>
+        <div class="actions"><button class="small primary" onclick="saveNote('${pid}')">${t("notes.save")}</button></div>
+        <p class="hint">${t("notes.clear_hint")}</p>
+        <p class="hint" id="note-msg-${pid}"></p>
+      </div>
+    </details>`;
+  }
+
+  async function saveNote(pid) {
+    const ta = document.getElementById("note-" + pid);
+    const msg = document.getElementById("note-msg-" + pid);
+    if (!ta || !msg) return;
+    msg.textContent = t("notes.saving");
+    try {
+      const res = await api.req(`/drivers/notes/${pid}`, {
+        method: "PUT", body: JSON.stringify({ note: ta.value }),
+      });
+      msg.textContent = res.deleted ? t("notes.deleted") : t("notes.saved");
+      await loadNotes();
+      setTimeout(refresh, 600);
+    } catch (e) { msg.textContent = e.message; }
+  }
+
+  // 正在编辑便签时不自动刷新，避免 15 秒轮询吞掉输入中的文字
+  function _noteEditing() {
+    const el = document.activeElement;
+    return (el && el.tagName === "TEXTAREA") || !!document.querySelector(".note-box[open]");
   }
 
   // ---- 新订单提示音：来新单时叮一声（首次点击页面后解锁音频权限） ----
@@ -145,6 +209,7 @@
 
   async function refresh() {
     try {
+      await loadNotes();
       const open = await api.openRides();
       $("open-count").textContent = open.length ? t("d.open_count", { n: open.length }) : "";
       $("open").innerHTML = open.length
@@ -168,8 +233,10 @@
       $("mine").innerHTML = mine.length
         ? mine.map((r) => {
             const next = nextStatus(r.status);
+            // 包车单点"完成行程"时先让司机填实际小时数，走 finish-hourly 结算
+            const isHourlyFinish = r.price_mode === "hourly" && next && next[0] === "completed";
             const btns = next
-              ? `<button class="small primary" onclick="advanceRide('${r.id}','${next[0]}')">${next[1]}</button>` : "";
+              ? `<button class="small primary" onclick="${isHourlyFinish ? `advanceHourly('${r.id}')` : `advanceRide('${r.id}','${next[0]}')`}">${next[1]}</button>` : "";
             const cancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status)
               ? `<button class="small danger" onclick="cancelRide('${r.id}')">${t("d.cancel")}</button>` : "";
             let quoteHtml = "";
@@ -202,6 +269,15 @@
   }
   async function advanceRide(id, status) {
     try { await api.setStatus(id, status); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+  // 包车结算：先弹框让司机填实际小时数，再调 finish-hourly
+  async function advanceHourly(id) {
+    const raw = prompt(t("d.hourly_hours"));
+    if (raw == null) return; // 用户点了取消
+    const hours = parseFloat(raw);
+    if (!(hours >= 0.5 && hours <= 24)) { alert(t("d.hourly_hours_bad")); return; }
+    try { await api.finishHourly(id, hours); refresh(); }
     catch (e) { alert(e.message); }
   }
   async function cancelRide(id) {
@@ -348,7 +424,7 @@
   }
 
   ensureSession($("login"), $("main"), () => checkRoleAndShow());
-  setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
+  setInterval(() => { if ($("main").style.display !== "none" && !_noteEditing()) refresh(); }, 15000);
   // 语言切换时重渲染动态内容
   window.addEventListener("pr:langchange", () => {
     if ($("main").style.display !== "none") {

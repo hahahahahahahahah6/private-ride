@@ -113,16 +113,20 @@ class RideCreate(BaseModel):
     dropoff_text: str = Field(min_length=1, max_length=500)
     seats_needed: int = Field(default=1, ge=1, le=20)
     note: str = Field(default="", max_length=1000)
+    # 航班号（可选）：机场接送用，如 "UA 857"，入库时去空格转大写
+    flight_no: str = Field(default="", max_length=16)
     scheduled_at: datetime | None = None
     # 多经停：最多 3 个
     stops: list[str] = Field(default_factory=list, max_length=3)
     # 代叫车：帮家人/朋友叫车
     booked_for_name: str = Field(default="", max_length=64)
     booked_for_phone: str = Field(default="", max_length=32)
-    # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价
-    price_mode: str = Field(default="offer", pattern="^(offer|mileage|quote)$")
+    # 价格：offer=乘客出价 / mileage=里程计价 / quote=司机报价 / hourly=包车按小时
+    price_mode: str = Field(default="offer", pattern="^(offer|mileage|quote|hourly)$")
     price_offer_cents: int | None = Field(default=None, ge=0)
     price_miles: float | None = Field(default=None, ge=0)
+    # 包车按小时：每小时价格（分），hourly 模式必填（接口里校验 >0）
+    hourly_rate_cents: int | None = Field(default=None, ge=0)
     # 付款：online=线上扣款 / offline=线下当面付
     pay_mode: str = Field(default="offline", pattern="^(online|offline)$")
 
@@ -154,6 +158,20 @@ class RideStatusIn(BaseModel):
     status: str = Field(pattern="^(accepted|en_route|arrived|in_progress|completed|cancelled)$")
 
 
+class HourlyFinishIn(BaseModel):
+    """包车结算输入：司机填写的实际服务小时数（0.5–24，服务端向上取整到 0.5 小时）。"""
+
+    hours: float = Field(ge=0.5, le=24, description="实际服务小时数")
+
+
+# 航班晚点自助调整：允许的延后分钟数（其他值接口返回 400）
+ALLOWED_DELAY_MINUTES = (30, 60, 120)
+
+
+class DelayIn(BaseModel):
+    minutes: int = Field(description="晚点分钟数，只允许 30 / 60 / 120")
+
+
 class RideOut(BaseModel):
     id: uuid.UUID
     passenger_id: uuid.UUID
@@ -162,6 +180,8 @@ class RideOut(BaseModel):
     dropoff_text: str
     seats_needed: int
     note: str
+    # 航班号：机场接送用
+    flight_no: str = ""
     status: str
     scheduled_at: datetime | None
     created_at: datetime
@@ -175,6 +195,8 @@ class RideOut(BaseModel):
     price_miles: float | None = None
     price_quote_cents: int | None = None
     price_final_cents: int | None = None
+    # 包车每小时价格（分）
+    hourly_rate_cents: int | None = None
     price_status: str = "pending"
     # 付款
     pay_mode: str = "offline"
@@ -193,6 +215,8 @@ class RideOut(BaseModel):
     driver_phone: str | None = None
     # 评价标签
     rating_tags: list[str] = Field(default_factory=list)
+    # 司机熟客便签：仅请求者是司机（本人写的）时填充，乘客看不到
+    passenger_note: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -210,6 +234,19 @@ class SavedPlaceOut(BaseModel):
     address_text: str
 
     model_config = {"from_attributes": True}
+
+
+# ---------- 司机熟客便签 ----------
+
+class NoteIn(BaseModel):
+    note: str = Field(default="", max_length=1000, description="便签内容；空字符串表示删除")
+
+
+class NoteOut(BaseModel):
+    passenger_id: uuid.UUID
+    passenger_name: str
+    note: str
+    updated_at: datetime
 
 
 # ---------- 行程分享 ----------

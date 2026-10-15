@@ -38,6 +38,9 @@
           <input id="when" type="datetime-local" />
         </div>
       </div>
+      <label class="f" for="flight-no" data-i18n="flight.label">航班号（可选）</label>
+      <input id="flight-no" data-i18n-ph="flight.ph" placeholder="UA 857" maxlength="16" style="text-transform:uppercase" />
+      <p class="hint" data-i18n="flight.hint">机场接送可填；落地发现晚点，可直接在订单里延后预约时间。</p>
       <label class="f" for="note" data-i18n="p.note">备注（可选）</label>
       <input id="note" data-i18n-ph="p.note_ph" placeholder="如：有大件行李、带小孩" />
       <details style="margin-bottom:10px">
@@ -52,6 +55,7 @@
         <button type="button" class="secondary small price-mode" data-mode="offer" style="flex:1" data-i18n="p.mode_offer">我出价</button>
         <button type="button" class="secondary small price-mode" data-mode="mileage" style="flex:1" data-i18n="p.mode_mileage">里程计价</button>
         <button type="button" class="secondary small price-mode" data-mode="quote" style="flex:1" data-i18n="p.mode_quote">司机报价</button>
+        <button type="button" class="secondary small price-mode" data-mode="hourly" style="flex:1" data-i18n="p.mode_hourly">包车/按小时</button>
       </div>
       <div id="price-offer-wrap">
         <label class="f" for="price-offer" data-i18n="p.offer_label">你的出价（美元）</label>
@@ -64,6 +68,10 @@
       </div>
       <div id="price-quote-wrap" style="display:none">
         <p class="hint" data-i18n="p.quote_hint">司机接单后会报价，你再确认。</p>
+      </div>
+      <div id="price-hourly-wrap" style="display:none">
+        <label class="f" for="price-hourly" data-i18n="p.hourly_label">每小时价格（美元）</label>
+        <input id="price-hourly" type="number" min="0" step="0.5" data-i18n-ph="p.hourly_ph" placeholder="如：80" />
       </div>
       <label class="f" data-i18n="p.payment">付款方式</label>
       <div class="row" style="gap:8px;margin-bottom:10px">
@@ -202,6 +210,7 @@
       $("price-offer-wrap").style.display = priceMode === "offer" ? "" : "none";
       $("price-mileage-wrap").style.display = priceMode === "mileage" ? "" : "none";
       $("price-quote-wrap").style.display = priceMode === "quote" ? "" : "none";
+      $("price-hourly-wrap").style.display = priceMode === "hourly" ? "" : "none";
     };
   });
   document.querySelector('.price-mode[data-mode="offer"]').classList.add("primary");
@@ -248,8 +257,15 @@
     // 分享：进行中订单可生成分享链接；催司机：accepted/en_route 可催
     const shareHtml = ["accepted", "en_route", "arrived", "in_progress"].includes(r.status)
       ? `<div class="actions"><button class="small secondary" onclick="shareRide('${r.id}')">${t("p.share")}</button></div>` : "";
+    // 航班晚点：有预约时间的待接单/已接单订单可一键延后
+    const delayHtml = (r.scheduled_at && ["requested", "accepted"].includes(r.status))
+      ? `<div class="actions"><span class="meta">${t("flight.delay")}：</span>${[30, 60, 120].map((m) =>
+          `<button class="small secondary" onclick="delayRide('${r.id}',${m})">+${m} ${t("flight.delay_unit")}</button>`).join(" ")}</div>` : "";
     const nudgeHtml = ["accepted", "en_route"].includes(r.status)
       ? `<div class="actions"><button class="small secondary" onclick="nudgeRide('${r.id}')">${t("p.nudge")}</button></div>` : "";
+    // 再来一单：已完成/已取消的订单可一键复购（固定线路）
+    const rebookHtml = ["completed", "cancelled"].includes(r.status)
+      ? `<div class="actions"><button class="small primary" onclick="rebookRide('${r.id}')">${t("rebook.btn")}</button></div>` : "";
     // 收据：已完成订单的费用明细
     const receiptHtml = r.status === "completed"
       ? `<div class="actions"><button class="small secondary" onclick="toggleReceipt('${r.id}')">${t("p.receipt")}</button></div>
@@ -268,6 +284,7 @@
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       ${stopsHtml}
       <div class="meta"><b>${riders(r.seats_needed)}</b>${r.note ? " · " + esc(r.note) : ""}</div>
+      ${r.flight_no ? `<div class="meta">${t("flight.show")}${esc(r.flight_no)}</div>` : ""}
       ${r.booked_for_name ? `<div class="meta">${t("p.booked_for")}${esc(r.booked_for_name)}${r.booked_for_phone ? " · " + esc(r.booked_for_phone) : ""}</div>` : ""}
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
@@ -289,7 +306,9 @@
       ${tipHtml}
       ${receiptHtml}
       ${shareHtml}
+      ${delayHtml}
       ${nudgeHtml}
+      ${rebookHtml}
       ${actionsHtml}
       ${quoteHtml}
     </div>`;
@@ -393,6 +412,15 @@
     catch (e) { alert(e.message); }
   }
 
+  async function rebookRide(id) {
+    if (!confirm(t("rebook.confirm"))) return;
+    try {
+      await api.req(`/rides/${id}/rebook`, { method: "POST" });
+      alert(t("rebook.ok"));
+      refresh();
+    } catch (e) { alert(e.message); }
+  }
+
   // ---- 评分（星级 + 标签） ----
   function ratingTagOpts() {
     return prLang() === "en"
@@ -436,6 +464,12 @@
     try { await api.req(`/rides/${id}/nudge`, { method: "POST" }); alert(t("p.nudged")); }
     catch (e) { alert(e.message); }
   }
+  // 航班晚点：二次确认后延后预约时间
+  async function delayRide(id, m) {
+    if (!confirm(t("flight.delay_q", { m }))) return;
+    try { await api.delayRide(id, m); alert(t("flight.delayed_ok", { m })); refresh(); }
+    catch (e) { alert(e.message); }
+  }
   function toggleReceipt(id) {
     const el = $(`receipt-${id}`);
     if (el) el.style.display = el.style.display === "none" ? "" : "none";
@@ -452,6 +486,7 @@
       seats_needed: parseInt($("seats").value) || 1,
       note: $("note").value.trim(),
       scheduled_at: when ? new Date(when).toISOString() : null,
+      flight_no: $("flight-no").value,
       price_mode: priceMode,
       pay_mode: payMode,
       stops: getStops(),
@@ -466,14 +501,19 @@
       const miles = parseFloat($("price-miles").value);
       if (!(miles > 0)) { msg.classList.remove("ok"); msg.textContent = t("p.need_miles"); return; }
       data.price_miles = miles;
+    } else if (priceMode === "hourly") {
+      const dollars = parseFloat($("price-hourly").value);
+      if (!(dollars > 0)) { msg.classList.remove("ok"); msg.textContent = t("p.need_hourly"); return; }
+      data.hourly_rate_cents = Math.round(dollars * 100);
     }
     try {
       await api.createRide(data);
       msg.classList.add("ok");
       msg.textContent = t("p.booked_ok");
       $("pickup").value = $("dropoff").value = $("note").value = "";
+      $("flight-no").value = "";
       $("bf-name").value = $("bf-phone").value = "";
-      $("price-offer").value = ""; $("price-miles").value = "";
+      $("price-offer").value = ""; $("price-miles").value = ""; $("price-hourly").value = "";
       refresh();
     } catch (e) { msg.classList.remove("ok"); msg.textContent = e.message; }
   };

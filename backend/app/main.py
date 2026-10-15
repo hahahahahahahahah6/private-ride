@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -17,16 +18,21 @@ from sqlalchemy.orm import Session
 from . import auth
 from .auth import get_current_user, require_driver
 from .database import get_db, init_db
-from .models import AuthToken, Driver, InviteCode, Ride, SavedPlace, ShareToken, User
+from .models import AuthToken, Driver, InviteCode, PassengerNote, Ride, SavedPlace, ShareToken, User
 from .schemas import (
     RATING_TAGS,
+    ALLOWED_DELAY_MINUTES,
+    DelayIn,
     DriverLocationOut,
     DriverProfileIn,
     DriverProfileOut,
     DriverStatusOut,
     EarningsOut,
+    HourlyFinishIn,
     LocationIn,
     MeUpdateIn,
+    NoteIn,
+    NoteOut,
     PushTokenIn,
     QuoteConfirmIn,
     QuoteIn,
@@ -144,7 +150,7 @@ def logout(token: AuthToken = Depends(auth.get_current_token),
 def delete_me(confirm: bool = Query(default=False),
               user: User = Depends(get_current_user),
               db: Session = Depends(get_db)) -> dict:
-    """注销账号。删掉该用户的所有登录 token、常用地址、分享链接、司机档案；
+    """注销账号。删掉该用户的所有登录 token、常用地址、分享链接、司机档案、熟客便签；
     订单保留但乘客/司机关联置空做匿名化（司机对账要用金额记录）。
     需要二次确认：必须传入 confirm=true 才执行。"""
     if not confirm:
@@ -155,10 +161,13 @@ def delete_me(confirm: bool = Query(default=False),
     uid = user.id
     # 1. 撤销该用户的所有登录 token
     db.query(AuthToken).filter(AuthToken.user_id == uid).delete(synchronize_session=False)
-    # 2. 删掉用户自有数据：常用地址、分享链接、司机档案
+    # 2. 删掉用户自有数据：常用地址、分享链接、司机档案、熟客便签
     db.query(SavedPlace).filter(SavedPlace.user_id == uid).delete(synchronize_session=False)
     db.query(ShareToken).filter(ShareToken.created_by == uid).delete(synchronize_session=False)
     db.query(Driver).filter(Driver.user_id == uid).delete(synchronize_session=False)
+    # 自己写的便签、别人写给自己的便签一并删除
+    db.query(PassengerNote).filter(PassengerNote.driver_id == uid).delete(synchronize_session=False)
+    db.query(PassengerNote).filter(PassengerNote.passenger_id == uid).delete(synchronize_session=False)
     # 邀请码本身保留（不断审计链），创建/使用人置空
     db.query(InviteCode).filter(InviteCode.created_by == uid).update(
         {"created_by": None}, synchronize_session=False)
@@ -266,7 +275,7 @@ def _driver_top_tags(db: Session, driver_id: uuid.UUID, limit: int = 3) -> list[
 
 def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
               pmap: dict | None = None, dmap: dict | None = None,
-              rmap: dict | None = None) -> Ride:
+              rmap: dict | None = None, nmap: dict | None = None) -> Ride:
     # 乘客联系方式只给相关人看：乘客本人、接单司机、管理员
     # 待接单列表里不暴露；已完成/已取消的订单不再显示（隐私）
     # pmap：批量预加载的 passenger 映射，避免列表页 N+1 查询
@@ -321,7 +330,34 @@ def _ride_out(ride: Ride, db: Session, viewer: User | None = None,
             if stats:
                 dv.avg_rating, dv.rating_count = stats
             ride.driver_vehicle = dv
+    # 司机熟客便签：只给司机看自己写的，乘客和无关人看不到
+    ride.passenger_note = None
+    if (viewer is not None and viewer.role in ("driver", "admin")
+            and ride.passenger_id is not None):
+        if nmap is not None:
+            ride.passenger_note = nmap.get(ride.passenger_id)
+        else:
+            row = (
+                db.query(PassengerNote.note)
+                .filter(PassengerNote.driver_id == viewer.id,
+                        PassengerNote.passenger_id == ride.passenger_id)
+                .first()
+            )
+            ride.passenger_note = row[0] if row else None
     return ride
+
+
+def _notes_map(db: Session, driver_id: uuid.UUID, rides: list[Ride]) -> dict:
+    """司机视角批量查熟客便签：{passenger_id: note}，接单前瞄一眼用，避免 N+1。"""
+    pids = {r.passenger_id for r in rides if r.passenger_id is not None}
+    if not pids:
+        return {}
+    return {
+        pid: note
+        for pid, note in db.query(PassengerNote.passenger_id, PassengerNote.note)
+        .filter(PassengerNote.driver_id == driver_id,
+                PassengerNote.passenger_id.in_(pids)).all()
+    }
 
 
 def _notify_new_ride_bg(ride_id: uuid.UUID) -> None:
@@ -361,6 +397,7 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
     # 按计价方式校验必填项并算出初始成交价
     offer_cents = payload.price_offer_cents
     miles = payload.price_miles
+    hourly_cents = payload.hourly_rate_cents
     final_cents: int | None = None
     if payload.price_mode == "offer":
         if offer_cents is None:
@@ -370,18 +407,27 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
         if miles is None:
             raise HTTPException(status_code=400, detail="里程计价请填写预估里程")
         final_cents = _mileage_price_cents(miles)
+    elif payload.price_mode == "hourly":
+        if hourly_cents is None or hourly_cents <= 0:
+            raise HTTPException(status_code=400, detail="包车模式请填写每小时价格（须大于 0）")
+        # 包车单：行程结束时按实际小时数结算，final 先空着
+        final_cents = None
     # quote 模式：等司机报价，final 先空着
     stops = [s.strip() for s in (payload.stops or []) if s.strip()][:3]
+    # 航班号：去所有空格、转大写，存起来（机场接送用）
+    flight_no = "".join((payload.flight_no or "").split()).upper()[:16]
     ride = Ride(
         passenger_id=user.id,
         pickup_text=payload.pickup_text,
         dropoff_text=payload.dropoff_text,
         seats_needed=payload.seats_needed,
         note=payload.note,
+        flight_no=flight_no,
         scheduled_at=payload.scheduled_at,
         price_mode=payload.price_mode,
         price_offer_cents=offer_cents,
         price_miles=miles,
+        hourly_rate_cents=hourly_cents if payload.price_mode == "hourly" else None,
         price_final_cents=final_cents,
         price_status="agreed" if final_cents is not None else "pending",
         pay_mode=payload.pay_mode,
@@ -408,7 +454,8 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
         if user.role not in ("driver", "admin"):
             raise HTTPException(status_code=403, detail="仅司机可查看待接单")
         rides = q.filter_by(status="requested").limit(limit).offset(offset).all()
-        return [_ride_out(r, db, user) for r in rides]
+        nmap = _notes_map(db, user.id, rides)
+        return [_ride_out(r, db, user, nmap=nmap) for r in rides]
     if mine:
         if user.role in ("driver", "admin"):
             # 司机视角：按预约时间正序（临近的在前），无预约时间的沉底
@@ -427,7 +474,23 @@ def list_rides(mine: bool = Query(default=True), open: bool = Query(default=Fals
         if drv_ids:
             dmap = {d.user_id: d for d in db.query(Driver).filter(Driver.user_id.in_(drv_ids)).all()}
     rmap = _driver_rating_stats(db, {r.driver_id for r in rides if r.driver_id is not None})
-    return [_ride_out(r, db, user, pmap, dmap, rmap) for r in rides]
+    nmap = _notes_map(db, user.id, rides) if user.role in ("driver", "admin") else None
+    return [_ride_out(r, db, user, pmap, dmap, rmap, nmap) for r in rides]
+
+
+@app.get("/rides/{ride_id}", response_model=RideOut)
+def get_ride(ride_id: uuid.UUID,
+             user: User = Depends(get_current_user),
+             db: Session = Depends(get_db)) -> Ride:
+    """查单条订单详情。司机看订单时会顺手拿到自己写的熟客便签（passenger_note）。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if not (user.role == "admin"
+            or ride.passenger_id == user.id
+            or ride.driver_id == user.id):
+        raise HTTPException(status_code=403, detail="无权查看此订单")
+    return _ride_out(ride, db, user)
 
 
 # ---------- 司机车辆档案 ----------
@@ -615,6 +678,59 @@ def delete_place(place_id: uuid.UUID,
     db.delete(place)
     db.commit()
     return {"ok": True}
+
+
+# ---------- 司机熟客便签 ----------
+
+@app.get("/drivers/notes", response_model=list[NoteOut])
+def list_notes(driver: User = Depends(require_driver),
+               db: Session = Depends(get_db)) -> list:
+    """司机查看自己写过的所有熟客便签（记住常客偏好，接单前瞄一眼）。"""
+    rows = (
+        db.query(PassengerNote, User.name)
+        .join(User, PassengerNote.passenger_id == User.id)
+        .filter(PassengerNote.driver_id == driver.id)
+        .order_by(PassengerNote.updated_at.desc())
+        .all()
+    )
+    return [
+        NoteOut(passenger_id=n.passenger_id, passenger_name=name or "",
+                note=n.note, updated_at=n.updated_at)
+        for n, name in rows
+    ]
+
+
+@app.put("/drivers/notes/{passenger_id}")
+def upsert_note(passenger_id: uuid.UUID, payload: NoteIn,
+                driver: User = Depends(require_driver),
+                db: Session = Depends(get_db)) -> dict:
+    """新增或更新一条熟客便签；note 为空字符串时删除该便签。"""
+    passenger = db.get(User, passenger_id)
+    if passenger is None:
+        raise HTTPException(status_code=404, detail="乘客不存在")
+    text = (payload.note or "").strip()
+    existing = (
+        db.query(PassengerNote)
+        .filter(PassengerNote.driver_id == driver.id,
+                PassengerNote.passenger_id == passenger_id)
+        .first()
+    )
+    if not text:
+        # 空字符串 = 删除
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        return {"ok": True, "deleted": True}
+    if existing is None:
+        existing = PassengerNote(driver_id=driver.id, passenger_id=passenger_id, note=text)
+        db.add(existing)
+    else:
+        existing.note = text
+    db.commit()
+    db.refresh(existing)
+    out = NoteOut(passenger_id=passenger_id, passenger_name=passenger.name or "",
+                  note=existing.note, updated_at=existing.updated_at)
+    return {"ok": True, "deleted": False, "note": out.model_dump(mode="json")}
 
 
 # ---------- 行程分享 ----------
@@ -879,6 +995,56 @@ def tip_ride(ride_id: uuid.UUID, payload: TipIn,
     return _ride_out(ride, db, user)
 
 
+@app.post("/rides/{ride_id}/delay", response_model=RideOut)
+def delay_ride(ride_id: uuid.UUID, payload: DelayIn,
+               user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)) -> Ride:
+    """航班晚点自助调整：乘客把预约时间往后顺延。只允许 30 / 60 / 120 分钟。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    # 只有下单乘客本人能调（管理员也不代调）
+    if ride.passenger_id != user.id:
+        raise HTTPException(status_code=403, detail="只有下单乘客能调整时间")
+    if payload.minutes not in ALLOWED_DELAY_MINUTES:
+        raise HTTPException(status_code=400, detail="晚点时长只能选 30、60 或 120 分钟")
+    if ride.scheduled_at is None:
+        raise HTTPException(status_code=400, detail="现在用车的订单不能改时间")
+    if ride.status not in ("requested", "accepted"):
+        raise HTTPException(status_code=400, detail="订单已不在可调整状态")
+    # 预约时间往后顺延
+    ride.scheduled_at = ride.scheduled_at + timedelta(minutes=payload.minutes)
+    db.commit()
+    db.refresh(ride)
+    # 给司机发推送：失败不影响调整结果
+    try:
+        from . import push as push_mod
+
+        driver = db.get(User, ride.driver_id) if ride.driver_id else None
+        token = getattr(driver, "push_token", None)
+        if token and push_mod.is_expo_push_token(token):
+            en = getattr(driver, "lang", "zh") == "en"
+            mins = payload.minutes
+            new_time = ride.scheduled_at.strftime("%m-%d %H:%M")
+            flight = f"（{ride.flight_no}）" if ride.flight_no else ""
+            title = "乘客航班晚点" if not en else "Flight delayed"
+            body = (
+                f"乘客航班晚点{flight} {mins} 分钟，新的预约时间：{new_time}"
+                if not en
+                else f"Passenger flight{flight} delayed by {mins} min. New pickup time: {new_time}"
+            )
+            push_mod.send_expo_push([{
+                "to": token,
+                "sound": "default",
+                "title": title,
+                "body": body,
+                "data": {"ride_id": str(ride.id), "type": "ride_delayed"},
+            }])
+    except Exception:
+        log.warning("delay push failed for ride %s", ride_id, exc_info=True)
+    return _ride_out(ride, db, user)
+
+
 # 催司机节流：每单每 5 分钟最多催一次（内存字典 + 定期清理）
 _nudge_ts: dict[str, float] = {}
 
@@ -925,6 +1091,59 @@ def nudge_driver(ride_id: uuid.UUID,
     return {"ok": True}
 
 
+def _after_ride_completed(ride: Ride, db: Session) -> None:
+    """行程完成后的通用收尾：线上付款自动扣款 + 邮件通知乘客。
+
+    扣款和通知失败都不阻塞完成状态（日志即可）。"""
+    # 行程完成：线上付款自动扣款（失败不阻塞）
+    try:
+        _try_charge_ride(db, ride)
+    except Exception:
+        pass
+    # 邮件通知乘客：失败不影响状态流转
+    try:
+        from . import notify as notify_mod
+        passenger = db.get(User, ride.passenger_id)
+        notify_mod.notify_status_change(
+            passenger.email if passenger else None,
+            "completed", ride.pickup_text, ride.dropoff_text,
+            passenger.lang if passenger else "zh")
+    except Exception:
+        pass
+
+
+@app.post("/rides/{ride_id}/finish-hourly", response_model=RideOut)
+def finish_hourly(ride_id: uuid.UUID, payload: HourlyFinishIn,
+                  driver: User = Depends(require_driver),
+                  db: Session = Depends(get_db)) -> Ride:
+    """包车单结算：只有接单司机能在 in_progress 时调；按实际小时数结算。
+
+    hours 范围 0.5–24（schema 校验），服务端向上取整到 0.5 小时，
+    price_final_cents = 结算小时数 × hourly_rate_cents（整数运算四舍五入到分）。
+    结算后状态 → completed，复用完成收尾（扣款/通知走 price_final_cents）。"""
+    ride = db.get(Ride, ride_id)
+    if ride is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if ride.driver_id != driver.id and driver.role != "admin":
+        raise HTTPException(status_code=403, detail="只能操作自己的订单")
+    if ride.price_mode != "hourly":
+        raise HTTPException(status_code=400, detail="只有包车订单能用小时结算")
+    if ride.status != "in_progress":
+        raise HTTPException(status_code=400, detail=f"{ride.status} 状态不可结算")
+    if ride.hourly_rate_cents is None or ride.hourly_rate_cents <= 0:
+        raise HTTPException(status_code=400, detail="订单缺少有效的每小时价格")
+    # 向上取整到 0.5 小时：用半小时个数做整数运算，避免浮点误差
+    half_units = math.ceil(payload.hours * 2 - 1e-9)
+    # 价格 = 结算小时数 × 每小时价格，四舍五入到分（整数运算：半分进位）
+    ride.price_final_cents = (half_units * ride.hourly_rate_cents + 1) // 2
+    ride.price_status = "agreed"
+    ride.status = "completed"
+    db.commit()
+    db.refresh(ride)
+    _after_ride_completed(ride, db)
+    return _ride_out(ride, db, driver)
+
+
 @app.post("/rides/{ride_id}/status", response_model=RideOut)
 def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
                    driver: User = Depends(require_driver),
@@ -939,6 +1158,9 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
             status_code=400,
             detail=f"不能从 {ride.status} 直接到 {payload.status}",
         )
+    # 包车单必须走 finish-hourly 填实际小时数结算，不能直接切完成
+    if payload.status == "completed" and ride.price_mode == "hourly":
+        raise HTTPException(status_code=400, detail="包车订单请填写实际小时数结算")
     # 出发前检查：同一时间只能有一单在路上（en_route/arrived/in_progress）
     if payload.status == "en_route":
         other_active = (
@@ -958,12 +1180,10 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
     ride.status = payload.status
     db.commit()
     db.refresh(ride)
-    # 行程完成：线上付款自动扣款（失败不阻塞）
+    # 行程完成：扣款 + 通知（复用通用收尾）
     if payload.status == "completed":
-        try:
-            _try_charge_ride(db, ride)
-        except Exception:
-            pass
+        _after_ride_completed(ride, db)
+        return _ride_out(ride, db, driver)
     # 邮件通知乘客：失败不影响状态流转
     try:
         from . import notify as notify_mod
@@ -1003,6 +1223,63 @@ def cancel_ride(ride_id: uuid.UUID, user: User = Depends(get_current_user),
     except Exception:
         pass
     return _ride_out(ride, db, user)
+
+
+# ---------- 一键再来一单（固定线路复购） ----------
+
+@app.post("/rides/{ride_id}/rebook", response_model=RideOut, status_code=201)
+def rebook_ride(ride_id: uuid.UUID, background_tasks: BackgroundTasks,
+                user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)) -> Ride:
+    """一键再来一单：把一条历史订单复制成新订单。
+
+    - 只能复购自己下的单（下单乘客本人；代叫车也算下单人自己的单）
+    - 只有 completed / cancelled 的单能复购（进行中的不能）
+    - 复制：线路/经停/人数/备注/航班号、价格方式与出价/里程/包车费率、代叫车信息、付款方式
+    - 不复制：用车时间（新单默认"现在用车"，前端可改）、司机、司机报价/成交价、评分、小费
+    """
+    old = db.get(Ride, ride_id)
+    if old is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if old.passenger_id != user.id:
+        raise HTTPException(status_code=403, detail="只能复购自己下的订单")
+    if old.status not in ("completed", "cancelled"):
+        raise HTTPException(status_code=400, detail="只有已完成或已取消的订单可以再来一单")
+    # 初始成交价与下单逻辑一致：出价模式直接用出价，里程模式按里程算；
+    # quote 模式等司机重新报价，final 先空着
+    offer_cents = old.price_offer_cents
+    miles = old.price_miles
+    final_cents: int | None = None
+    if old.price_mode == "offer":
+        final_cents = offer_cents
+    elif old.price_mode == "mileage" and miles is not None:
+        final_cents = _mileage_price_cents(miles)
+    new = Ride(
+        passenger_id=user.id,
+        pickup_text=old.pickup_text,
+        dropoff_text=old.dropoff_text,
+        seats_needed=old.seats_needed,
+        note=old.note,
+        flight_no=old.flight_no,
+        # scheduled_at 不复制：新单默认"现在用车"，让用户在前端改
+        price_mode=old.price_mode,
+        price_offer_cents=offer_cents,
+        price_miles=miles,
+        hourly_rate_cents=old.hourly_rate_cents,
+        price_final_cents=final_cents,
+        price_status="agreed" if final_cents is not None else "pending",
+        pay_mode=old.pay_mode,
+        stops_json=old.stops_json,
+        booked_for_name=old.booked_for_name,
+        booked_for_phone=old.booked_for_phone,
+        # driver_id / price_quote_cents / rating_* / tip_cents 归零（模型默认值）
+    )
+    db.add(new)
+    db.commit()
+    db.refresh(new)
+    # 新订单通知司机（与下单一致走后台任务）
+    background_tasks.add_task(_notify_new_ride_bg, new.id)
+    return _ride_out(new, db, user)
 
 
 # ---------- 付款（Stripe 线上 / 线下当面） ----------
