@@ -41,6 +41,11 @@ def send_expo_push(messages: list[dict]) -> list[dict]:
     return payload.get("data", [])
 
 
+def _lang_of(user) -> str:
+    """用户语言，非法值回退中文。"""
+    return "en" if getattr(user, "lang", "zh") == "en" else "zh"
+
+
 def notify_drivers_of_new_ride(db, ride) -> dict:
     """新订单 → 推送给所有在线且有 push_token 的司机。返回统计，不抛异常。"""
     from .models import Driver, User  # 避免循环导入
@@ -59,20 +64,37 @@ def notify_drivers_of_new_ride(db, ride) -> dict:
     if not tokens:
         return {"sent": 0, "skipped": len(drivers), "reason": "no valid push tokens"}
 
-    title = "🚕 新订单"
-    text = f"{ride.pickup_text} → {ride.dropoff_text}"
-    if ride.seats_needed and ride.seats_needed > 1:
-        text += f"（{ride.seats_needed} 位）"
-    messages = [
-        {
-            "to": tok,
-            "sound": "default",
-            "title": title,
-            "body": text,
-            "data": {"ride_id": str(ride.id), "type": "new_ride"},
-        }
-        for tok in tokens
-    ]
+    # 按司机语言分组，各发各的文案
+    by_lang: dict[str, list[str]] = {"zh": [], "en": []}
+    for d in drivers:
+        if is_expo_push_token(d.push_token):
+            by_lang[_lang_of(d)].append(d.push_token)
+    bodies = {
+        "zh": (
+            "🚕 新订单",
+            f"{ride.pickup_text} → {ride.dropoff_text}"
+            + (f"（{ride.seats_needed} 位）" if ride.seats_needed and ride.seats_needed > 1 else ""),
+        ),
+        "en": (
+            "🚕 New ride request",
+            f"{ride.pickup_text} → {ride.dropoff_text}"
+            + (f" ({ride.seats_needed} passengers)" if ride.seats_needed and ride.seats_needed > 1 else ""),
+        ),
+    }
+    messages = []
+    for lang, toks in by_lang.items():
+        title, text = bodies[lang]
+        for tok in toks:
+            messages.append({
+                "to": tok,
+                "sound": "default",
+                "title": title,
+                "body": text,
+                "data": {"ride_id": str(ride.id), "type": "new_ride"},
+            })
+    # 保持 token 顺序与 tickets 一一对应，用于清理死 token
+    order = [t for toks in by_lang.values() for t in toks]
+    tokens = order
     try:
         tickets = send_expo_push(messages)
     except Exception as exc:  # 网络/Expo 故障不影响下单

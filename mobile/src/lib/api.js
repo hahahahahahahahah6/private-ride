@@ -43,11 +43,12 @@ export const api = {
 
   me: () => req("/me"),
 
-  // 上报 Expo push token（司机端登录后调用）
-  setPushToken: (push_token) =>
+  // 上报 Expo push token（司机端登录后调用）；lang 可选，后端目前忽略多余字段，
+  // 将来可按用户语言发双语推送
+  setPushToken: (push_token, lang) =>
     req("/me/push-token", {
       method: "PUT",
-      body: JSON.stringify({ push_token }),
+      body: JSON.stringify(lang ? { push_token, lang } : { push_token }),
     }),
 
   // 乘客下单

@@ -3,29 +3,30 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006d" />
+<title data-i18n="meta.title.index">私人专车</title>
+<link rel="stylesheet" href="styles.css?v=20261014a" />
 </head>
 <body>
 <div class="wrap">
   <div class="topbar">
     <div class="brand">
       <span class="mark">🚗</span>
-      <h1>私人专车<em>PRIVATE RIDE</em></h1>
+      <h1><span data-i18n="brand.name">私人专车</span><em>PRIVATE RIDE</em></h1>
     </div>
+    <span class="links"><button type="button" class="lang-toggle" id="lang-toggle">EN</button></span>
   </div>
 
   <div class="hero">
-    <div class="kicker">家人朋友 · 专属叫车</div>
-    <h1>一键叫车<br /><span class="gold">司机马上到</span></h1>
-    <p>TCP 持牌运营，家人朋友的私人车队。<br />网页与 App 共用同一后端。</p>
+    <div class="kicker" data-i18n="index.kicker">家人朋友 · 专属叫车</div>
+    <h1><span data-i18n="index.hero1">一键叫车</span><br /><span class="gold" data-i18n="index.hero2">司机马上到</span></h1>
+    <p data-i18n-html="index.hero_sub">TCP 持牌运营，家人朋友的私人车队。<br />网页与 App 共用同一后端。</p>
   </div>
 
   <a class="role-card" href="passenger.html">
     <span class="icon">🧍</span>
     <span>
-      <div class="t">我是乘客</div>
-      <div class="s">输入上下车地点，一键叫车，实时看订单状态</div>
+      <div class="t" data-i18n="index.rider_t">我是乘客</div>
+      <div class="s" data-i18n="index.rider_s">输入上下车地点，一键叫车，实时看订单状态</div>
     </span>
     <span class="go">›</span>
   </a>
@@ -33,13 +34,14 @@
   <a class="role-card" href="driver.html">
     <span class="icon">🚙</span>
     <span>
-      <div class="t">我是司机</div>
-      <div class="s">查看待接订单，一键接单，全程状态管理</div>
+      <div class="t" data-i18n="index.driver_t">我是司机</div>
+      <div class="s" data-i18n="index.driver_s">查看待接订单，一键接单，全程状态管理</div>
     </span>
     <span class="go">›</span>
   </a>
 
   <p class="center">V0.3</p>
 </div>
+<script src="i18n.js?v=20261014a"></script>
 </body>
 </html>

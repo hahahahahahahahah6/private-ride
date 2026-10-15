@@ -44,6 +44,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, default=None)
     name: Mapped[str] = mapped_column(String(64), default="")
     role: Mapped[str] = mapped_column(String(16), default="passenger")  # passenger|driver|admin
+    lang: Mapped[str] = mapped_column(String(8), default="zh")  # zh | en，通知文案语言
     push_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Stripe 绑卡（线上付款用）
     stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
@@ -71,7 +72,9 @@ class Ride(Base):
     __tablename__ = "rides"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    passenger_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
+    # 账号注销时置空做匿名化（订单保留给司机对账），所以允许为空
+    passenger_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id"), nullable=True, index=True)
     driver_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True, index=True)
     pickup_text: Mapped[str] = mapped_column(Text, default="")
     dropoff_text: Mapped[str] = mapped_column(Text, default="")

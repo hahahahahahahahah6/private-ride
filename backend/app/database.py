@@ -80,3 +80,36 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN rating_tags_json TEXT"))
         if "reminder_sent" not in ride_cols:
             conn.execute(text("ALTER TABLE rides ADD COLUMN reminder_sent INTEGER DEFAULT 0"))
+        # 老库补列：users 表加语言字段（通知文案用）
+        user_cols = {c["name"] for c in inspect(conn).get_columns("users")}
+        if "lang" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN lang VARCHAR(8) DEFAULT 'zh'"))
+        # 老库结构变更：rides.passenger_id 改为可空
+        # （账号注销时订单要匿名化：关联置空但订单保留给司机对账）
+        col_nullable = {
+            c["name"]: c.get("nullable", True)
+            for c in inspect(conn).get_columns("rides")
+        }
+        if not col_nullable.get("passenger_id", True):
+            if DATABASE_URL.startswith("sqlite"):
+                # SQLite 不支持直接改列可空：重建表，数据原样复制
+                old_indexes = [
+                    r[0]
+                    for r in conn.execute(text(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type = 'index' AND tbl_name IN ('rides', 'rides_old')"
+                    ))
+                ]
+                conn.execute(text("ALTER TABLE rides RENAME TO rides_old"))
+                for ix in old_indexes:
+                    conn.execute(text(f'DROP INDEX IF EXISTS "{ix}"'))
+                models.Ride.__table__.create(bind=conn)
+                old_cols = [c["name"] for c in inspect(conn).get_columns("rides_old")]
+                csv = ", ".join(old_cols)
+                conn.execute(text(f"INSERT INTO rides ({csv}) SELECT {csv} FROM rides_old"))
+                conn.execute(text("DROP TABLE rides_old"))
+            else:
+                # Postgres：直接放开 NOT NULL
+                conn.execute(text(
+                    "ALTER TABLE rides ALTER COLUMN passenger_id DROP NOT NULL"
+                ))

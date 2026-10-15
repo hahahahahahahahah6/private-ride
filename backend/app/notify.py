@@ -37,29 +37,51 @@ def _send(to_email: str, subject: str, text: str) -> None:
         json.load(resp)
 
 
-def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff: str) -> None:
+def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff: str,
+                         lang: str = "zh") -> None:
     """司机接单/到达/完成时邮件通知乘客。无邮箱或发送失败时静默跳过。"""
     if not to_email:
         return
+    lang = "en" if lang == "en" else "zh"
     subjects = {
-        "accepted": "司机已接单",
-        "arrived": "司机已到达上车点",
-        "in_progress": "行程已开始",
-        "completed": "行程已完成",
-        "cancelled": "订单已取消",
+        "zh": {
+            "accepted": "司机已接单",
+            "arrived": "司机已到达上车点",
+            "in_progress": "行程已开始",
+            "completed": "行程已完成",
+            "cancelled": "订单已取消",
+        },
+        "en": {
+            "accepted": "Driver accepted your ride",
+            "arrived": "Driver has arrived",
+            "in_progress": "Your ride has started",
+            "completed": "Ride completed",
+            "cancelled": "Ride cancelled",
+        },
     }
-    subject = subjects.get(status)
+    subject = subjects[lang].get(status)
     if not subject:
         return
-    bodies = {
-        "accepted": f"您的司机已接单，正在赶来。\n\n上车：{pickup}\n下车：{dropoff}\n\n司机稍后会与您联系。",
-        "arrived": f"司机已到达上车点，请准备上车。\n\n上车：{pickup}\n下车：{dropoff}",
-        "in_progress": f"行程已开始，祝您一路顺利。\n\n上车：{pickup}\n下车：{dropoff}",
-        "completed": f"行程已完成，感谢乘坐私人专车。\n\n上车：{pickup}\n下车：{dropoff}",
-        "cancelled": f"您的订单已取消。\n\n上车：{pickup}\n下车：{dropoff}\n\n如需重新叫车请再下一单。",
-    }
+    if lang == "en":
+        bodies = {
+            "accepted": f"Your driver is on the way.\n\nPickup: {pickup}\nDropoff: {dropoff}\n\nThe driver will contact you shortly.",
+            "arrived": f"Your driver has arrived at the pickup point.\n\nPickup: {pickup}\nDropoff: {dropoff}",
+            "in_progress": f"Your ride has started. Have a smooth trip.\n\nPickup: {pickup}\nDropoff: {dropoff}",
+            "completed": f"Ride completed. Thanks for riding with Private Ride.\n\nPickup: {pickup}\nDropoff: {dropoff}",
+            "cancelled": f"Your ride has been cancelled.\n\nPickup: {pickup}\nDropoff: {dropoff}\n\nBook again anytime you need a ride.",
+        }
+        brand = "Private Ride"
+    else:
+        bodies = {
+            "accepted": f"您的司机已接单，正在赶来。\n\n上车：{pickup}\n下车：{dropoff}\n\n司机稍后会与您联系。",
+            "arrived": f"司机已到达上车点，请准备上车。\n\n上车：{pickup}\n下车：{dropoff}",
+            "in_progress": f"行程已开始，祝您一路顺利。\n\n上车：{pickup}\n下车：{dropoff}",
+            "completed": f"行程已完成，感谢乘坐私人专车。\n\n上车：{pickup}\n下车：{dropoff}",
+            "cancelled": f"您的订单已取消。\n\n上车：{pickup}\n下车：{dropoff}\n\n如需重新叫车请再下一单。",
+        }
+        brand = "私人专车"
     try:
-        _send(to_email, f"私人专车：{subject}", bodies[status])
+        _send(to_email, f"{brand}：{subject}" if lang == "zh" else f"{brand}: {subject}", bodies[status])
     except Exception as e:
         log.warning("notify email failed: %s", e)
 

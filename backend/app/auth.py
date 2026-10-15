@@ -304,18 +304,37 @@ def _as_aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def get_current_user(
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-) -> User:
+def _validate_token(
+    authorization: str | None,
+    db: Session,
+) -> AuthToken:
+    """校验 Bearer token，返回 token 行；失败抛 401（中文提示）。"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="缺少登录凭证")
     tok = db.get(AuthToken, authorization[7:])
     if tok is None or _as_aware(tok.expires_at) < _now():
         raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
-    user = db.get(User, tok.user_id)
-    if user is None:
+    if db.get(User, tok.user_id) is None:
         raise HTTPException(status_code=401, detail="用户不存在")
+    return tok
+
+
+def get_current_token(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> AuthToken:
+    """当前请求携带的 token 行（退出登录等需要按 token 操作的场景用）。"""
+    return _validate_token(authorization, db)
+
+
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> User:
+    tok = _validate_token(authorization, db)
+    # _validate_token 已确认用户存在
+    user = db.get(User, tok.user_id)
+    assert user is not None
     return user
 
 

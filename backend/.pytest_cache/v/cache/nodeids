@@ -1,0 +1,18 @@
+[
+  "tests/test_account.py::test_delete_me_完整注销流程",
+  "tests/test_account.py::test_delete_me_未登录401",
+  "tests/test_account.py::test_delete_me_需要二次确认",
+  "tests/test_account.py::test_logout_只撤销当前token不影响其他登录",
+  "tests/test_account.py::test_logout_撤销当前token后立即失效",
+  "tests/test_account.py::test_logout_未登录401",
+  "tests/test_account.py::test_patch_me_拒绝自己改role",
+  "tests/test_account.py::test_patch_me_昵称超长400",
+  "tests/test_account.py::test_patch_me_更新昵称成功",
+  "tests/test_account.py::test_patch_me_未登录401",
+  "tests/test_push.py::test_notify_drivers_only_drivers_with_valid_tokens",
+  "tests/test_push.py::test_notify_no_drivers_no_http",
+  "tests/test_push.py::test_notify_push_failure_does_not_raise",
+  "tests/test_push.py::test_notify_skips_offline_drivers",
+  "tests/test_push.py::test_send_expo_push_payload_format",
+  "tests/test_push.py::test_token_validation"
+]

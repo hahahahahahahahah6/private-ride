@@ -25,7 +25,7 @@ const api = {
       ...options,
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.detail || ("请求失败 " + res.status));
+    if (!res.ok) throw new Error(body.detail || t("api.fail", { s: res.status }));
     return body;
   },
   requestCode: (phone, email) =>
@@ -58,39 +58,21 @@ function fmtPrice(cents) {
   return "$" + (cents / 100).toFixed(2);
 }
 function priceLabel(r) {
-  if (r.price_mode === "offer") return `乘客出价 ${fmtPrice(r.price_offer_cents)}`;
-  if (r.price_mode === "mileage") return `里程计价 ${fmtPrice(r.price_final_cents)}（约${r.price_miles}英里）`;
+  if (r.price_mode === "offer") return t("price.offer", { p: fmtPrice(r.price_offer_cents) });
+  if (r.price_mode === "mileage") return t("price.mileage", { p: fmtPrice(r.price_final_cents), m: r.price_miles });
   if (r.price_mode === "quote") {
-    if (r.price_status === "agreed") return `已确认 ${fmtPrice(r.price_final_cents)}`;
-    if (r.price_quote_cents != null) return `司机报价 ${fmtPrice(r.price_quote_cents)}（待确认）`;
-    return "等司机报价";
+    if (r.price_status === "agreed") return t("price.quoted_agreed", { p: fmtPrice(r.price_final_cents) });
+    if (r.price_quote_cents != null) return t("price.quoted_pending", { p: fmtPrice(r.price_quote_cents) });
+    return t("price.waiting_quote");
   }
   return "";
 }
 function payLabel(r) {
-  const mode = r.pay_mode === "online" ? "线上付款" : "线下当面付";
+  const mode = r.pay_mode === "online" ? t("pay.online") : t("pay.offline");
   if (r.pay_mode === "offline") return mode;
-  const st = r.pay_status === "paid" ? "已扣款" : r.pay_status === "failed" ? "扣款失败" : "待扣款";
+  const st = r.pay_status === "paid" ? t("pay.paid") : r.pay_status === "failed" ? t("pay.failed") : t("pay.pending");
   return `${mode} · ${st}`;
 }
-
-const STATUS_LABEL = {
-  requested: "待接单",
-  accepted: "司机已接单",
-  en_route: "司机正在赶来",
-  arrived: "司机已到达",
-  in_progress: "行程中",
-  completed: "已完成",
-  cancelled: "已取消",
-};
-
-/* 下一步可点的状态按钮（司机用） */
-const NEXT_STATUS = {
-  accepted: ["en_route", "出发接客"],
-  en_route: ["arrived", "已到达上车点"],
-  arrived: ["in_progress", "开始行程"],
-  in_progress: ["completed", "完成行程"],
-};
 
 function badgeClass(status) {
   if (status === "requested") return "badge b-requested";
@@ -101,14 +83,14 @@ function badgeClass(status) {
 
 function rideCard(r, actionsHtml = "") {
   const when = r.scheduled_at
-    ? new Date(r.scheduled_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    : "现在用车";
+    ? new Date(r.scheduled_at).toLocaleString(dateLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : t("card.now");
   return `<div class="card">
-    <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
+    <div class="card-head"><span class="${badgeClass(r.status)}">${statusLabel(r.status)}</span>
     <span class="time">${when}</span></div>
     <div class="route"><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
     <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
-    <div class="meta">${r.seats_needed} 人${r.note ? " · " + esc(r.note) : ""}</div>
+    <div class="meta">${riders(r.seats_needed)}${r.note ? " · " + esc(r.note) : ""}</div>
     ${actionsHtml}
   </div>`;
 }
@@ -121,39 +103,40 @@ function esc(s) {
 function mountLogin(el, onOk) {
   let mode = "phone"; // phone | email
   el.classList.add("pr-auth");
+  el._loginOnOk = onOk;
   el.innerHTML = `
     <div class="pr-screen">
       <header class="pr-brand">
         <div class="pr-brand-badge" aria-hidden="true">🚕</div>
-        <h1 class="pr-brand-name">私人专车</h1>
+        <h1 class="pr-brand-name">${t("brand.name")}</h1>
         <p class="pr-brand-en">PRIVATE RIDE</p>
       </header>
-      <section class="pr-card" aria-label="登录">
+      <section class="pr-card" aria-label="${t("auth.signin_aria")}">
         <div class="pr-tabs" role="tablist" data-mode="phone" id="pr-tabs">
-          <button class="pr-tab" id="tab-phone" role="tab" aria-selected="true" data-mode="phone">手机号登录</button>
-          <button class="pr-tab" id="tab-email" role="tab" aria-selected="false" data-mode="email">邮箱登录</button>
+          <button class="pr-tab" id="tab-phone" role="tab" aria-selected="true" data-mode="phone">${t("auth.tab_phone")}</button>
+          <button class="pr-tab" id="tab-email" role="tab" aria-selected="false" data-mode="email">${t("auth.tab_email")}</button>
           <span class="pr-tab-ink" aria-hidden="true"></span>
         </div>
         <label class="pr-field">
-          <input id="login-ident" type="tel" inputmode="numeric" autocomplete="tel" placeholder="手机号，如 6268660555" aria-label="手机号" />
+          <input id="login-ident" type="tel" inputmode="numeric" autocomplete="tel" placeholder="${t("auth.ph_phone")}" aria-label="${t("auth.aria_phone")}" />
         </label>
         <div class="pr-code-row">
           <label class="pr-field">
-            <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="验证码" aria-label="验证码" />
+            <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="${t("auth.ph_code")}" aria-label="${t("auth.aria_code")}" />
           </label>
-          <button class="pr-btn-code" id="btn-code" type="button">获取验证码</button>
+          <button class="pr-btn-code" id="btn-code" type="button">${t("auth.get_code")}</button>
         </div>
         <p class="pr-msg" id="login-msg" aria-live="polite"></p>
-        <button class="pr-btn-login" id="btn-login" type="button">登录</button>
+        <button class="pr-btn-login" id="btn-login" type="button">${t("auth.login")}</button>
       </section>
-      <footer class="pr-slogan">每一程，皆从容</footer>
+      <footer class="pr-slogan">${t("auth.slogan")}</footer>
     </div>`;
-  const msg = (t) => (el.querySelector("#login-msg").textContent = t);
+  const msg = (txt) => (el.querySelector("#login-msg").textContent = txt);
   const identInput = () => el.querySelector("#login-ident");
   const tabs = () => el.querySelector("#pr-tabs");
   const modes = {
-    phone: { ph: "手机号，如 6268660555", type: "tel", im: "numeric", ac: "tel", label: "手机号" },
-    email: { ph: "邮箱，如 you@gmail.com", type: "email", im: "email", ac: "email", label: "邮箱" },
+    phone: { ph: t("auth.ph_phone"), type: "tel", im: "numeric", ac: "tel", label: t("auth.aria_phone") },
+    email: { ph: t("auth.ph_email"), type: "email", im: "email", ac: "email", label: t("auth.aria_email") },
   };
   const setMode = (m) => {
     mode = m;
@@ -176,10 +159,10 @@ function mountLogin(el, onOk) {
   const ident = () => identInput().value.trim();
   el.querySelector("#btn-code").onclick = async () => {
     const v = ident();
-    if (!v) return msg(mode === "phone" ? "请先填手机号" : "请先填邮箱");
+    if (!v) return msg(mode === "phone" ? t("auth.need_phone") : t("auth.need_email"));
     try {
       const r = await api.requestCode(mode === "phone" ? v : null, mode === "email" ? v : null);
-      msg(r.dev_code ? `开发模式验证码：${r.dev_code}` : "验证码已发送");
+      msg(r.dev_code ? t("auth.dev_code", { code: r.dev_code }) : t("auth.code_sent"));
     } catch (e) { msg(e.message); }
   };
   el.querySelector("#btn-login").onclick = async () => {
@@ -220,3 +203,10 @@ function logout() {
   localStorage.removeItem("pr_token");
   location.reload();
 }
+
+/* 语言切换时重渲染登录组件（仅当登录屏可见时） */
+window.addEventListener("pr:langchange", () => {
+  document.querySelectorAll("#login.pr-auth").forEach((el) => {
+    if (el._loginOnOk && el.style.display !== "none") mountLogin(el, el._loginOnOk);
+  });
+});

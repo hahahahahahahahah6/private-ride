@@ -8,6 +8,7 @@ import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { api } from "./api";
+import { getLang, t } from "./i18n";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -43,14 +44,14 @@ export async function registerForPushNotificationsAsync() {
 
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
-      name: "订单通知",
+      name: t("push.channelName"),
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
     });
   }
 
-  // 上报后端（需要已登录，api 会带上 Bearer token）
-  await api.setPushToken(token);
+  // 上报后端（需要已登录，api 会带上 Bearer token）；附带语言，后端发推送时可按用户语言选模板
+  await api.setPushToken(token, getLang());
   console.log("[push] 已上报 push token");
   return token;
 }

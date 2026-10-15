@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from . import auth
 from .auth import get_current_user, require_driver
 from .database import get_db, init_db
-from .models import Driver, InviteCode, Ride, SavedPlace, ShareToken, User
+from .models import AuthToken, Driver, InviteCode, Ride, SavedPlace, ShareToken, User
 from .schemas import (
     RATING_TAGS,
     DriverLocationOut,
@@ -26,6 +26,7 @@ from .schemas import (
     DriverStatusOut,
     EarningsOut,
     LocationIn,
+    MeUpdateIn,
     PushTokenIn,
     QuoteConfirmIn,
     QuoteIn,
@@ -102,6 +103,74 @@ def me(user: User = Depends(get_current_user)) -> User:
 def set_push_token(payload: PushTokenIn, user: User = Depends(get_current_user),
                    db: Session = Depends(get_db)) -> dict:
     user.push_token = payload.push_token
+    if payload.lang in ("zh", "en"):
+        user.lang = payload.lang
+    db.commit()
+    return {"ok": True}
+
+
+@app.patch("/me", response_model=UserOut)
+async def update_me(request: Request, payload: MeUpdateIn,
+                    user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)) -> User:
+    """用户自己更新资料（目前只有昵称）。role 不许自己改，带了就 403。"""
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    if isinstance(raw, dict) and "role" in raw:
+        raise HTTPException(status_code=403, detail="不能自己修改 role，请联系管理员")
+    name = (payload.name or "").strip()
+    if len(name) > 64:
+        raise HTTPException(status_code=400, detail="昵称最多 64 个字符")
+    user.name = name
+    if payload.lang in ("zh", "en"):
+        user.lang = payload.lang
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/auth/logout")
+def logout(token: AuthToken = Depends(auth.get_current_token),
+           db: Session = Depends(get_db)) -> dict:
+    """退出登录：撤销当前请求携带的 token，调用后该 token 立即失效。"""
+    db.delete(token)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/me")
+def delete_me(confirm: bool = Query(default=False),
+              user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)) -> dict:
+    """注销账号。删掉该用户的所有登录 token、常用地址、分享链接、司机档案；
+    订单保留但乘客/司机关联置空做匿名化（司机对账要用金额记录）。
+    需要二次确认：必须传入 confirm=true 才执行。"""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="注销账号将永久删除您的资料，该操作不可恢复；请传入 confirm=true 二次确认",
+        )
+    uid = user.id
+    # 1. 撤销该用户的所有登录 token
+    db.query(AuthToken).filter(AuthToken.user_id == uid).delete(synchronize_session=False)
+    # 2. 删掉用户自有数据：常用地址、分享链接、司机档案
+    db.query(SavedPlace).filter(SavedPlace.user_id == uid).delete(synchronize_session=False)
+    db.query(ShareToken).filter(ShareToken.created_by == uid).delete(synchronize_session=False)
+    db.query(Driver).filter(Driver.user_id == uid).delete(synchronize_session=False)
+    # 邀请码本身保留（不断审计链），创建/使用人置空
+    db.query(InviteCode).filter(InviteCode.created_by == uid).update(
+        {"created_by": None}, synchronize_session=False)
+    db.query(InviteCode).filter(InviteCode.used_by == uid).update(
+        {"used_by": None}, synchronize_session=False)
+    # 3. 订单匿名化：关联置空，订单本身保留
+    db.query(Ride).filter(Ride.passenger_id == uid).update(
+        {"passenger_id": None}, synchronize_session=False)
+    db.query(Ride).filter(Ride.driver_id == uid).update(
+        {"driver_id": None}, synchronize_session=False)
+    # 4. 删用户行
+    db.delete(user)
     db.commit()
     return {"ok": True}
 
@@ -694,7 +763,8 @@ def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
         passenger = db.get(User, ride.passenger_id)
         notify_mod.notify_status_change(
             passenger.email if passenger else None,
-            "accepted", ride.pickup_text, ride.dropoff_text)
+            "accepted", ride.pickup_text, ride.dropoff_text,
+            passenger.lang if passenger else "zh")
     except Exception:
         pass
     return _ride_out(ride, db, driver)
@@ -844,8 +914,10 @@ def nudge_driver(ride_id: uuid.UUID,
         if token and push_mod.is_expo_push_token(token):
             push_mod.send_expo_push([{
                 "to": token,
-                "title": "乘客在等你",
-                "body": f"乘客催了一下：{ride.pickup_text}，请尽快出发 🚗",
+                "title": "乘客在等你" if getattr(driver, "lang", "zh") != "en" else "Passenger is waiting",
+                "body": f"乘客催了一下：{ride.pickup_text}，请尽快出发 🚗"
+                if getattr(driver, "lang", "zh") != "en"
+                else f"Passenger nudged you: {ride.pickup_text} — please head out soon 🚗",
                 "sound": "default",
             }])
     except Exception:
@@ -898,7 +970,8 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
         passenger = db.get(User, ride.passenger_id)
         notify_mod.notify_status_change(
             passenger.email if passenger else None,
-            payload.status, ride.pickup_text, ride.dropoff_text)
+            payload.status, ride.pickup_text, ride.dropoff_text,
+            passenger.lang if passenger else "zh")
     except Exception:
         pass
     return _ride_out(ride, db, driver)
@@ -925,7 +998,8 @@ def cancel_ride(ride_id: uuid.UUID, user: User = Depends(get_current_user),
         passenger = db.get(User, ride.passenger_id)
         notify_mod.notify_status_change(
             passenger.email if passenger else None,
-            "cancelled", ride.pickup_text, ride.dropoff_text)
+            "cancelled", ride.pickup_text, ride.dropoff_text,
+            passenger.lang if passenger else "zh")
     except Exception:
         pass
     return _ride_out(ride, db, user)

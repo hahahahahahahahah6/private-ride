@@ -10,16 +10,26 @@ import {
 } from "react-native";
 import { api } from "../lib/api";
 import { registerForPushNotificationsAsync } from "../lib/push";
+import { useI18n } from "../lib/i18n";
 
 export default function DriverHome() {
+  const { t } = useI18n();
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [user, setUser] = useState(null);
-  const [pushState, setPushState] = useState("未注册");
+  // 推送状态用 key 存，渲染时才走字典，切换语言能即时重译
+  const [push, setPush] = useState({ key: "unregistered", error: "" });
   const [rides, setRides] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  const pushText = () => {
+    if (push.key === "enabled") return t("driver.pushEnabled");
+    if (push.key === "failed")
+      return t("driver.pushFailed", { error: push.error });
+    return t("driver.pushUnregistered");
+  };
 
   const loadOpenRides = async () => {
     try {
@@ -34,9 +44,9 @@ export default function DriverHome() {
     (async () => {
       try {
         await registerForPushNotificationsAsync();
-        setPushState("已开启 ✅ 新订单会推送到这台手机");
+        setPush({ key: "enabled", error: "" });
       } catch (e) {
-        setPushState(`注册失败：${e.message}`);
+        setPush({ key: "failed", error: e.message });
       }
       loadOpenRides();
     })();
@@ -83,10 +93,10 @@ export default function DriverHome() {
   if (!user) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>司机登录</Text>
+        <Text style={styles.title}>{t("driver.loginTitle")}</Text>
         <TextInput
           style={styles.input}
-          placeholder="手机号"
+          placeholder={t("driver.phonePlaceholder")}
           keyboardType="phone-pad"
           value={phone}
           onChangeText={setPhone}
@@ -94,7 +104,7 @@ export default function DriverHome() {
         {codeSent && (
           <TextInput
             style={styles.input}
-            placeholder="验证码"
+            placeholder={t("driver.codePlaceholder")}
             keyboardType="number-pad"
             value={code}
             onChangeText={setCode}
@@ -103,9 +113,9 @@ export default function DriverHome() {
         {busy ? (
           <ActivityIndicator />
         ) : codeSent ? (
-          <Button title="登录" onPress={login} />
+          <Button title={t("common.login")} onPress={login} />
         ) : (
-          <Button title="获取验证码" onPress={sendCode} />
+          <Button title={t("driver.getCode")} onPress={sendCode} />
         )}
         {error && <Text style={styles.err}>{error}</Text>}
       </View>
@@ -114,19 +124,21 @@ export default function DriverHome() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>待接订单</Text>
-      <Text style={styles.hint}>推送状态：{pushState}</Text>
+      <Text style={styles.title}>{t("driver.openOrders")}</Text>
+      <Text style={styles.hint}>{t("driver.pushStatus", { state: pushText() })}</Text>
       <FlatList
         data={rides}
         keyExtractor={(r) => r.id}
-        ListEmptyComponent={<Text style={styles.hint}>暂无待接订单</Text>}
+        ListEmptyComponent={<Text style={styles.hint}>{t("driver.noOrders")}</Text>}
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text style={styles.route}>
               {item.pickup_text} → {item.dropoff_text}
             </Text>
-            {item.note ? <Text style={styles.hint}>备注：{item.note}</Text> : null}
-            <Button title="接单" onPress={() => accept(item.id)} />
+            {item.note ? (
+              <Text style={styles.hint}>{t("driver.note", { note: item.note })}</Text>
+            ) : null}
+            <Button title={t("driver.accept")} onPress={() => accept(item.id)} />
           </View>
         )}
       />

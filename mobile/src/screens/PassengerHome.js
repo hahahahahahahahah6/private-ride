@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { api } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 export default function PassengerHome() {
+  const { t } = useI18n();
   const [health, setHealth] = useState(null);
   const [error, setError] = useState(null);
 
@@ -15,12 +17,12 @@ export default function PassengerHome() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>乘客端</Text>
-      <Text style={styles.sub}>约车 / 看订单状态（M2 接入）</Text>
+      <Text style={styles.title}>{t("passenger.title")}</Text>
+      <Text style={styles.sub}>{t("passenger.subtitle")}</Text>
       {health ? (
-        <Text style={styles.ok}>后端连接正常 ✅ {health.service}</Text>
+        <Text style={styles.ok}>{t("passenger.backendOk", { service: health.service })}</Text>
       ) : error ? (
-        <Text style={styles.err}>后端连不上：{error}</Text>
+        <Text style={styles.err}>{t("passenger.backendFail", { error })}</Text>
       ) : (
         <ActivityIndicator />
       )}

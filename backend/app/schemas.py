@@ -48,6 +48,13 @@ class TokenOut(BaseModel):
 
 class PushTokenIn(BaseModel):
     push_token: str = Field(min_length=1, max_length=128)
+    lang: str | None = Field(default=None, description="用户语言 zh|en，随 push token 上报")
+
+
+class MeUpdateIn(BaseModel):
+    # 用户自己可改的资料：目前只有昵称。role 不许自己改（接口里单独拦截）。
+    name: str = Field(default="", description="昵称")
+    lang: str | None = Field(default=None, description="语言偏好 zh|en")
 
 
 # ---------- driver profile ----------

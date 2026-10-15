@@ -169,6 +169,7 @@ button.primary {
   box-shadow: 0 6px 28px rgba(242, 202, 80, .28);
 }
 button.secondary { background: var(--card-highest); color: var(--text); font-weight: 600; white-space: nowrap; }
+button.secondary.active { outline: 2px solid var(--gold); color: var(--gold); }
 button.danger { background: var(--red-soft); color: var(--red); font-weight: 600; }
 button.small { padding: 10px 20px; font-size: 14px; font-weight: 700; width: auto; }
 button.small.primary { width: auto; }
@@ -302,3 +303,12 @@ button.small.go { box-shadow: 0 4px 18px rgba(242, 202, 80, .3); }
 #login.pr-auth .pr-slogan::before,#login.pr-auth .pr-slogan::after{content:"";width:28px;height:1px;background:linear-gradient(90deg,transparent,rgba(245,197,24,.6))}
 #login.pr-auth .pr-slogan::after{transform:scaleX(-1)}
 @media (prefers-reduced-motion:reduce){#login.pr-auth *{animation:none!important;transition:none!important}}
+
+/* ---------- i18n language toggle ---------- */
+.lang-toggle {
+  width: auto; padding: 6px 14px; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+  color: var(--gold); background: transparent;
+  border: 1px solid rgba(242, 202, 80, .45); border-radius: 999px;
+  cursor: pointer; white-space: nowrap;
+}
+.lang-toggle:active { background: rgba(242, 202, 80, .14); }

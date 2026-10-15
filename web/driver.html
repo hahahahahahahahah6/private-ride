@@ -3,28 +3,28 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>司机 · 私人专车</title>
-<link rel="stylesheet" href="styles.css?v=20261006e" />
+<title data-i18n="meta.title.driver">司机 · 私人专车</title>
+<link rel="stylesheet" href="styles.css?v=20261014a" />
 </head>
 <body>
 <div class="wrap">
   <div class="topbar">
     <div class="brand">
       <span class="mark">🚙</span>
-      <h1>司机接单<em>DRIVER</em></h1>
+      <h1><span data-i18n="d.title">司机接单</span><em>DRIVER</em></h1>
     </div>
-    <span class="links"><a href="index.html">切换身份</a><a href="#" onclick="logout();return false;">退出</a></span>
+    <span class="links"><button type="button" class="lang-toggle" id="lang-toggle">EN</button><a href="account.html" data-i18n="nav.account">账号</a><a href="index.html" data-i18n="nav.switch">切换身份</a><a href="#" onclick="logout();return false;" data-i18n="nav.signout">退出</a></span>
   </div>
 
   <div id="login"></div>
 
   <div id="invite" style="display:none">
     <div class="card">
-      <div class="card_h">司机邀请码</div>
-      <p class="hint">你是乘客身份。输入司机邀请码即可成为司机、查看并接受订单。</p>
+      <div class="card_h" data-i18n="d.invite">司机邀请码</div>
+      <p class="hint" data-i18n="d.invite_hint">你是乘客身份。输入司机邀请码即可成为司机、查看并接受订单。</p>
       <div class="row">
-        <input id="invite-code" placeholder="8 位邀请码" style="flex:1;text-transform:uppercase" maxlength="8" />
-        <button class="secondary" id="btn-redeem">兑换</button>
+        <input id="invite-code" data-i18n-ph="d.invite_ph" placeholder="8 位邀请码" style="flex:1;text-transform:uppercase" maxlength="8" />
+        <button class="secondary" id="btn-redeem" data-i18n="d.redeem">兑换</button>
       </div>
       <p class="hint" id="invite-msg"></p>
     </div>
@@ -32,47 +32,48 @@
 
   <div id="main" style="display:none">
     <div class="card">
-      <div class="card_h">接单状态</div>
+      <div class="card_h" data-i18n="d.duty">接单状态</div>
       <div class="row" style="align-items:center">
         <span id="online-label" style="flex:1">🟢 在线接单中</span>
-        <button class="small primary" id="btn-toggle-online">切换</button>
+        <button class="small primary" id="btn-toggle-online" data-i18n="d.toggle">切换</button>
       </div>
-      <p class="hint">休息时切换为离线，新订单不会再推送给你。</p>
+      <p class="hint" data-i18n="d.duty_hint">休息时切换为离线，新订单不会再推送给你。</p>
     </div>
     <div class="card">
-      <div class="card_h">收入统计</div>
+      <div class="card_h" data-i18n="d.earnings">收入统计</div>
       <div class="row" style="gap:8px;margin-bottom:8px">
-        <button type="button" class="secondary small earn-days" data-days="7" style="flex:1">近 7 天</button>
-        <button type="button" class="secondary small earn-days" data-days="30" style="flex:1">近 30 天</button>
+        <button type="button" class="secondary small earn-days" data-days="7" style="flex:1" data-i18n="d.d7">近 7 天</button>
+        <button type="button" class="secondary small earn-days" data-days="30" style="flex:1" data-i18n="d.d30">近 30 天</button>
       </div>
       <div class="meta" id="earn-line">加载中…</div>
     </div>
     <div class="card">
-      <div class="card_h">我的车辆</div>
+      <div class="card_h" data-i18n="d.vehicle">我的车辆</div>
       <div class="row">
         <div style="flex:2">
-          <label class="f" for="v-model">车型</label>
-          <input id="v-model" placeholder="例如：Toyota Sienna" maxlength="64" />
+          <label class="f" for="v-model" data-i18n="d.v_model">车型</label>
+          <input id="v-model" data-i18n-ph="d.v_model_ph" placeholder="例如：Toyota Sienna" maxlength="64" />
         </div>
         <div style="flex:1">
-          <label class="f" for="v-seats">座位数</label>
+          <label class="f" for="v-seats" data-i18n="d.v_seats">座位数</label>
           <input id="v-seats" type="number" min="1" max="20" value="6" />
         </div>
       </div>
-      <label class="f" for="v-plate">车牌</label>
-      <input id="v-plate" placeholder="例如：8ABC123" maxlength="16" style="text-transform:uppercase" />
-      <div class="actions"><button class="small primary" id="btn-save-vehicle">保存车辆信息</button></div>
+      <label class="f" for="v-plate" data-i18n="d.v_plate">车牌</label>
+      <input id="v-plate" data-i18n-ph="d.v_plate_ph" placeholder="例如：8ABC123" maxlength="16" style="text-transform:uppercase" />
+      <div class="actions"><button class="small primary" id="btn-save-vehicle" data-i18n="d.save_vehicle">保存车辆信息</button></div>
       <p class="hint" id="vehicle-msg"></p>
       <p class="hint" id="rating-line"></p>
       <p class="hint" id="loc-badge"></p>
     </div>
-    <div class="sec"><h3>待接订单</h3><span class="count" id="open-count"></span></div>
+    <div class="sec"><h3 data-i18n="d.open">待接订单</h3><span class="count" id="open-count"></span></div>
     <div id="open"></div>
-    <div class="sec"><h3>我的行程</h3><span class="count" id="mine-count"></span></div>
+    <div class="sec"><h3 data-i18n="d.mine">我的行程</h3><span class="count" id="mine-count"></span></div>
     <div id="mine"></div>
   </div>
 </div>
-<script src="app.js?v=20261006e"></script>
+<script src="i18n.js?v=20261014a"></script>
+<script src="app.js?v=20261014a"></script>
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -89,10 +90,10 @@
 
   function rideCard2(r, actionsHtml = "") {
     const when = r.scheduled_at
-      ? new Date(r.scheduled_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
-      : "现在用车";
+      ? new Date(r.scheduled_at).toLocaleString(dateLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : t("card.now");
     const stops = (r.stops && r.stops.length)
-      ? `<div class="meta">📍 经停：${r.stops.map(esc).join(" → ")}</div>` : "";
+      ? `<div class="meta">${t("p.stops")}${r.stops.map(esc).join(" → ")}</div>` : "";
     // 去接人：导航到上车点；行程中：导航全程（上车点→经停→下车点）
     const navUrl = ["arrived", "in_progress"].includes(r.status)
       ? "https://www.google.com/maps/dir/?api=1"
@@ -100,18 +101,18 @@
         + "&destination=" + encodeURIComponent(r.dropoff_text)
         + ((r.stops && r.stops.length) ? "&waypoints=" + r.stops.map(encodeURIComponent).join("|") : "")
       : "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(r.pickup_text);
-    const navLabel = ["arrived", "in_progress"].includes(r.status) ? "导航行程路线" : "导航到上车点";
+    const navLabel = ["arrived", "in_progress"].includes(r.status) ? t("d.nav_trip") : t("d.nav_pickup");
     return `<div class="card">
-      <div class="card-head"><span class="${badgeClass(r.status)}">${STATUS_LABEL[r.status] || r.status}</span>
+      <div class="card-head"><span class="${badgeClass(r.status)}">${statusLabel(r.status)}</span>
       <span class="time">${when}</span></div>
       <div class="route"><span class="route-line"></span><span class="pdot from"></span><span>${esc(r.pickup_text)}</span></div>
       <div class="route"><span class="pdot to"></span><span>${esc(r.dropoff_text)}</span></div>
       ${stops}
-      <div class="meta"><b>${r.seats_needed}</b> 人${r.note ? " · " + esc(r.note) : ""}</div>
-      ${r.booked_for_name ? `<div class="meta">🧑‍🤝‍🧑 代叫：${esc(r.booked_for_name)}${r.booked_for_phone ? " · " + esc(r.booked_for_phone) : ""}</div>` : ""}
+      <div class="meta"><b>${riders(r.seats_needed)}</b>${r.note ? " · " + esc(r.note) : ""}</div>
+      ${r.booked_for_name ? `<div class="meta">${t("p.booked_for")}${esc(r.booked_for_name)}${r.booked_for_phone ? " · " + esc(r.booked_for_phone) : ""}</div>` : ""}
       <div class="meta">💰 ${esc(priceLabel(r))}</div>
       <div class="meta">💳 ${esc(payLabel(r))}</div>
-      ${r.passenger_contact ? `<div class="meta">📞 乘客：${contactLinks(r.passenger_contact)}</div>` : ""}
+      ${r.passenger_contact ? `<div class="meta">${t("d.passenger")}${contactLinks(r.passenger_contact)}</div>` : ""}
       <div class="meta">🗺️ <a href="${navUrl}" target="_blank">${navLabel}</a></div>
       ${actionsHtml}
     </div>`;
@@ -145,11 +146,11 @@
   async function refresh() {
     try {
       const open = await api.openRides();
-      $("open-count").textContent = open.length ? `${open.length} 单待接` : "";
+      $("open-count").textContent = open.length ? t("d.open_count", { n: open.length }) : "";
       $("open").innerHTML = open.length
         ? open.map((r) => rideCard2(r,
-            `<div class="actions"><button class="small primary go" onclick="acceptRide('${r.id}')">接单</button></div>`)).join("")
-        : '<div class="empty"><span class="big">☕</span>暂无待接订单<br />有新订单会实时出现在这里</div>';
+            `<div class="actions"><button class="small primary go" onclick="acceptRide('${r.id}')">${t("d.accept")}</button></div>`)).join("")
+        : `<div class="empty"><span class="big">☕</span>${t("d.no_open")}<br />${t("d.no_open_sub")}</div>`;
       // 新出现的订单 ID → 提示音（首次加载不响）
       const ids = new Set(open.map((r) => r.id));
       if (!_firstOpenLoad) {
@@ -163,34 +164,34 @@
     try {
       const mine = (await api.myRides()).filter((r) => !["completed", "cancelled"].includes(r.status));
       maybeShareLocation(mine.length > 0);
-      $("mine-count").textContent = mine.length ? `${mine.length} 单进行中` : "";
+      $("mine-count").textContent = mine.length ? t("d.mine_count", { n: mine.length }) : "";
       $("mine").innerHTML = mine.length
         ? mine.map((r) => {
-            const next = NEXT_STATUS[r.status];
+            const next = nextStatus(r.status);
             const btns = next
               ? `<button class="small primary" onclick="advanceRide('${r.id}','${next[0]}')">${next[1]}</button>` : "";
             const cancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status)
-              ? `<button class="small danger" onclick="cancelRide('${r.id}')">取消</button>` : "";
+              ? `<button class="small danger" onclick="cancelRide('${r.id}')">${t("d.cancel")}</button>` : "";
             let quoteHtml = "";
             if (r.price_mode === "quote" && ["accepted", "en_route"].includes(r.status)
                 && (r.price_status !== "pending" || r.price_quote_cents == null)) {
               quoteHtml = `<div class="actions" style="margin-top:8px">
-                <input id="quote-${r.id}" type="number" min="0" step="0.5" placeholder="报价 $" style="width:110px" />
-                <button class="small primary" onclick="quoteRide('${r.id}')">报价</button>
+                <input id="quote-${r.id}" type="number" min="0" step="0.5" placeholder="${t("d.quote_ph")}" style="width:110px" />
+                <button class="small primary" onclick="quoteRide('${r.id}')">${t("d.quote")}</button>
               </div>`;
             } else if (r.price_mode === "quote" && r.price_status === "pending" && r.price_quote_cents != null) {
-              quoteHtml = `<div class="meta">⏳ 已报价 ${fmtPrice(r.price_quote_cents)}，等乘客确认</div>`;
+              quoteHtml = `<div class="meta">${t("d.quoted_wait", { p: fmtPrice(r.price_quote_cents) })}</div>`;
             }
             return rideCard2(r, `<div class="actions">${btns}${cancel}</div>${quoteHtml}`);
           }).join("")
-        : '<div class="empty"><span class="big">🛣️</span>暂无进行中的行程</div>';
+        : `<div class="empty"><span class="big">🛣️</span>${t("d.no_mine")}</div>`;
     } catch (e) { $("mine").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
   }
 
   async function quoteRide(id) {
     const inp = $("quote-" + id);
     const dollars = parseFloat(inp.value);
-    if (!(dollars > 0)) { alert("请填写报价"); return; }
+    if (!(dollars > 0)) { alert(t("d.need_quote")); return; }
     try { await api.quoteRide(id, Math.round(dollars * 100)); refresh(); }
     catch (e) { alert(e.message); }
   }
@@ -204,7 +205,7 @@
     catch (e) { alert(e.message); }
   }
   async function cancelRide(id) {
-    if (!confirm("确定取消这单吗？")) return;
+    if (!confirm(t("d.confirm_cancel"))) return;
     try { await api.cancelRide(id); refresh(); }
     catch (e) { alert(e.message); }
   }
@@ -212,12 +213,12 @@
   $("btn-redeem").onclick = async () => {
     const code = $("invite-code").value.trim();
     const msg = $("invite-msg");
-    if (!code) { msg.textContent = "请输入邀请码"; return; }
+    if (!code) { msg.textContent = t("d.need_code"); return; }
     try {
       await api.req("/invites/redeem", {
         method: "POST", body: JSON.stringify({ code }),
       });
-      msg.textContent = "✓ 已成为司机";
+      msg.textContent = t("d.became_driver");
       setTimeout(() => location.reload(), 800);
     } catch (e) { msg.textContent = e.message; }
   };
@@ -249,7 +250,7 @@
     } catch (e) { /* */ }
   }
   function setOnlineLabel(online) {
-    $("online-label").textContent = online ? "🟢 在线接单中" : "🔴 休息中（不接新单）";
+    $("online-label").textContent = online ? t("d.online") : t("d.offline");
   }
   $("btn-toggle-online").onclick = async () => {
     const nowOnline = $("online-label").textContent.includes("在线");
@@ -274,10 +275,16 @@
   document.querySelector('.earn-days[data-days="7"]').classList.add("primary");
   async function loadEarnings(days) {
     const el = $("earn-line");
-    el.textContent = "加载中…";
+    el.textContent = t("d.loading");
     try {
       const r = await api.req(`/me/earnings?days=${days}`);
-      el.textContent = `完成 ${r.completed_count} 单 · 车费 $${(r.fare_cents / 100).toFixed(2)} · 小费 $${(r.tip_cents / 100).toFixed(2)} · 合计 $${(r.total_cents / 100).toFixed(2)}${r.avg_rating ? ` · ⭐${r.avg_rating}` : ""}`;
+      el.textContent = t("d.earn_line", {
+        c: r.completed_count,
+        f: "$" + (r.fare_cents / 100).toFixed(2),
+        tp: "$" + (r.tip_cents / 100).toFixed(2),
+        tt: "$" + (r.total_cents / 100).toFixed(2),
+        r: r.avg_rating ? ` · ⭐${r.avg_rating}` : "",
+      });
     } catch (e) { el.textContent = e.message; }
   }
 
@@ -287,8 +294,12 @@
       $("v-model").value = p.vehicle_model || "";
       $("v-plate").value = p.plate || "";
       $("v-seats").value = p.seats || 6;
+      const tagSep = prLang() === "en" ? ", " : "、";
       $("rating-line").textContent = p.rating_count > 0
-        ? `⭐ 平均 ${p.avg_rating} 分（${p.rating_count} 条评价）${(p.top_tags || []).length ? " · 乘客常夸：" + p.top_tags.join("、") : ""}`
+        ? t("d.rating_line", {
+            a: p.avg_rating, c: p.rating_count,
+            tags: (p.top_tags || []).length ? t("d.rating_tags", { t: p.top_tags.join(tagSep) }) : "",
+          })
         : "";
     } catch (e) { /* 没填过就空着 */ }
   }
@@ -300,11 +311,11 @@
       plate: $("v-plate").value.trim(),
       seats: parseInt($("v-seats").value) || 6,
     };
-    if (!data.vehicle_model && !data.plate) { msg.textContent = "请至少填写车型或车牌"; return; }
-    msg.textContent = "保存中…";
+    if (!data.vehicle_model && !data.plate) { msg.textContent = t("d.need_vehicle"); return; }
+    msg.textContent = t("d.saving");
     try {
       await api.saveDriverProfile(data);
-      msg.textContent = "✓ 已保存，乘客在进行中的订单里能看到你的车";
+      msg.textContent = t("d.saved");
     } catch (e) { msg.textContent = e.message; }
   };
 
@@ -325,10 +336,10 @@
     if (hasActiveRide && "geolocation" in navigator && locWatchId === null) {
       locWatchId = navigator.geolocation.watchPosition(
         (pos) => sendLocation(pos.coords.latitude, pos.coords.longitude),
-        () => { if (badge) badge.textContent = "⚠️ 位置权限被拒，乘客看不到你的实时位置"; },
+        () => { if (badge) badge.textContent = t("d.loc_denied"); },
         { enableHighAccuracy: true, maximumAge: 10000 }
       );
-      if (badge) badge.textContent = "📍 正在共享位置给乘客";
+      if (badge) badge.textContent = t("d.loc_sharing");
     } else if (!hasActiveRide && locWatchId !== null) {
       navigator.geolocation.clearWatch(locWatchId);
       locWatchId = null;
@@ -338,6 +349,13 @@
 
   ensureSession($("login"), $("main"), () => checkRoleAndShow());
   setInterval(() => { if ($("main").style.display !== "none") refresh(); }, 15000);
+  // 语言切换时重渲染动态内容
+  window.addEventListener("pr:langchange", () => {
+    if ($("main").style.display !== "none") {
+      refresh(); loadEarnings(earnDays); loadOnline();
+      if ($("invite").style.display === "none") loadVehicle();
+    }
+  });
 </script>
 </body>
 </html>
