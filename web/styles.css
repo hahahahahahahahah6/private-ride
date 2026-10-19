@@ -312,3 +312,16 @@ button.small.go { box-shadow: 0 4px 18px rgba(242, 202, 80, .3); }
   cursor: pointer; white-space: nowrap;
 }
 .lang-toggle:active { background: rgba(242, 202, 80, .14); }
+
+/* ---------- 装到桌面（PWA） ---------- */
+@media (display-mode: standalone) {
+  .wrap { padding-top: env(safe-area-inset-top); }
+}
+.install-card { position: relative; margin-top: 18px; padding: 16px 44px 16px 16px; border-radius: 16px;
+  background: var(--card); border: 1px solid var(--amber-soft); }
+.install-card[hidden] { display: none; }
+.install-card .t { font-weight: 700; color: var(--gold); }
+.install-card .s { margin-top: 4px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.install-card button.primary { margin-top: 10px; }
+.install-card .install-x { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; padding: 0;
+  background: transparent; color: var(--muted); font-size: 20px; border: 0; }

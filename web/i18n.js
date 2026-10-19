@@ -280,6 +280,10 @@
       "d.hourly_hours": "包车单：请输入实际服务小时数（0.5–24，支持小数，0.5 小时向上取整）",
       "d.hourly_hours_bad": "小时数须在 0.5–24 之间",
       "d.cancel": "退回订单",
+      "install.t": "装到手机桌面，像 App 一样用",
+      "install.ios": "用 Safari 打开，点底部的分享按钮，再点“添加到主屏幕”",
+      "install.android": "一键装到桌面，打开更快",
+      "install.btn": "安装 App",
       "d.confirm_cancel": "去不了这单？订单会退回给其他司机接，乘客不用重新下单。",
       "d.passenger": "📞 乘客：",
 
@@ -586,6 +590,10 @@
       "d.hourly_hours": "Charter ride: enter actual service hours (0.5–24, decimals allowed, rounds up to 0.5h)",
       "d.hourly_hours_bad": "Hours must be between 0.5 and 24",
       "d.cancel": "Release ride",
+      "install.t": "Add it to your home screen",
+      "install.ios": "Open in Safari, tap Share, then \"Add to Home Screen\"",
+      "install.android": "Install it for one-tap access",
+      "install.btn": "Install app",
       "d.confirm_cancel": "Can't make it? The ride goes back to the queue for other drivers.",
       "d.passenger": "📞 Rider:",
 
