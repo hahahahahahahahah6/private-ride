@@ -279,8 +279,8 @@
       "d.quoted_wait": "⏳ 已报价 {p}，等乘客确认",
       "d.hourly_hours": "包车单：请输入实际服务小时数（0.5–24，支持小数，0.5 小时向上取整）",
       "d.hourly_hours_bad": "小时数须在 0.5–24 之间",
-      "d.cancel": "取消",
-      "d.confirm_cancel": "确定取消这单吗？",
+      "d.cancel": "退回订单",
+      "d.confirm_cancel": "去不了这单？订单会退回给其他司机接，乘客不用重新下单。",
       "d.passenger": "📞 乘客：",
 
       "tr.title": "行程分享",
@@ -585,8 +585,8 @@
       "d.quoted_wait": "⏳ Quoted {p} — waiting for rider",
       "d.hourly_hours": "Charter ride: enter actual service hours (0.5–24, decimals allowed, rounds up to 0.5h)",
       "d.hourly_hours_bad": "Hours must be between 0.5 and 24",
-      "d.cancel": "Cancel",
-      "d.confirm_cancel": "Cancel this ride?",
+      "d.cancel": "Release ride",
+      "d.confirm_cancel": "Can't make it? The ride goes back to the queue for other drivers.",
       "d.passenger": "📞 Rider:",
 
       "tr.title": "Shared ride",

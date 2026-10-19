@@ -240,7 +240,7 @@
             const cancel = ["requested", "accepted", "en_route", "arrived"].includes(r.status)
               ? `<button class="small danger" onclick="cancelRide('${r.id}')">${t("d.cancel")}</button>` : "";
             let quoteHtml = "";
-            if (r.price_mode === "quote" && ["accepted", "en_route"].includes(r.status)
+            if (r.price_mode === "quote" && ["accepted", "en_route", "arrived"].includes(r.status)
                 && (r.price_status !== "pending" || r.price_quote_cents == null)) {
               quoteHtml = `<div class="actions" style="margin-top:8px">
                 <input id="quote-${r.id}" type="number" min="0" step="0.5" placeholder="${t("d.quote_ph")}" style="width:110px" />

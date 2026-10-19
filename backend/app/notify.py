@@ -50,6 +50,8 @@ def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff
             "in_progress": "行程已开始",
             "completed": "行程已完成",
             "cancelled": "订单已取消",
+            "en_route": "司机已出发",
+            "released": "司机退回了订单，正在重新派单",
         },
         "en": {
             "accepted": "Driver accepted your ride",
@@ -57,6 +59,8 @@ def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff
             "in_progress": "Your ride has started",
             "completed": "Ride completed",
             "cancelled": "Ride cancelled",
+            "en_route": "Your driver is on the way",
+            "released": "Finding you another driver",
         },
     }
     subject = subjects[lang].get(status)
@@ -69,6 +73,8 @@ def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff
             "in_progress": f"Your ride has started. Have a smooth trip.\n\nPickup: {pickup}\nDropoff: {dropoff}",
             "completed": f"Ride completed. Thanks for riding with Private Ride.\n\nPickup: {pickup}\nDropoff: {dropoff}",
             "cancelled": f"Your ride has been cancelled.\n\nPickup: {pickup}\nDropoff: {dropoff}\n\nBook again anytime you need a ride.",
+            "en_route": f"Your driver is heading to the pickup point.\n\nPickup: {pickup}\nDropoff: {dropoff}",
+            "released": f"Your driver can't make it, so the ride is back in the queue for other drivers. You don't need to book again.\n\nPickup: {pickup}\nDropoff: {dropoff}",
         }
         brand = "Private Ride"
     else:
@@ -78,6 +84,8 @@ def notify_status_change(to_email: str | None, status: str, pickup: str, dropoff
             "in_progress": f"行程已开始，祝您一路顺利。\n\n上车：{pickup}\n下车：{dropoff}",
             "completed": f"行程已完成，感谢乘坐私人专车。\n\n上车：{pickup}\n下车：{dropoff}",
             "cancelled": f"您的订单已取消。\n\n上车：{pickup}\n下车：{dropoff}\n\n如需重新叫车请再下一单。",
+            "en_route": f"司机已出发，正在赶往上车点。\n\n上车：{pickup}\n下车：{dropoff}",
+            "released": f"原司机临时去不了，订单已退回给其他司机接，您不用重新下单。\n\n上车：{pickup}\n下车：{dropoff}",
         }
         brand = "私人专车"
     try:

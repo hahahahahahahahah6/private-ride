@@ -46,6 +46,52 @@ def _lang_of(user) -> str:
     return "en" if getattr(user, "lang", "zh") == "en" else "zh"
 
 
+_PASSENGER_TEXT = {
+    "zh": {
+        "accepted": ("✅ 司机已接单", "司机接了您的订单：{p} → {d}"),
+        "en_route": ("🚗 司机已出发", "司机正在赶往 {p}"),
+        "arrived": ("📍 司机已到达", "司机已到上车点：{p}，请准备上车"),
+        "in_progress": ("🛣️ 行程开始", "祝您一路顺利：{p} → {d}"),
+        "completed": ("🏁 行程完成", "感谢乘坐，欢迎给司机评分"),
+        "cancelled": ("订单已取消", "{p} → {d} 的订单已取消"),
+        "released": ("司机暂时接不了", "司机退回了订单，正在重新派给其他司机：{p} → {d}"),
+        "quoted": ("💰 司机已报价", "司机报价 {price}，请打开 App 确认"),
+    },
+    "en": {
+        "accepted": ("✅ Driver accepted", "Your ride {p} → {d} was accepted"),
+        "en_route": ("🚗 Driver on the way", "Your driver is heading to {p}"),
+        "arrived": ("📍 Driver arrived", "Your driver is at {p}"),
+        "in_progress": ("🛣️ Ride started", "Have a smooth trip: {p} → {d}"),
+        "completed": ("🏁 Ride completed", "Thanks for riding. Rate your driver anytime."),
+        "cancelled": ("Ride cancelled", "Your ride {p} → {d} was cancelled"),
+        "released": ("Driver released the ride", "We're finding another driver: {p} → {d}"),
+        "quoted": ("💰 New price quote", "Your driver quoted {price}. Open the app to confirm."),
+    },
+}
+
+
+def notify_user(user, kind: str, ride, **extra) -> bool:
+    """给单个用户发一条订单状态推送（乘客用）。没 token 或失败返回 False，不抛异常。"""
+    if user is None or not is_expo_push_token(getattr(user, "push_token", None)):
+        return False
+    texts = _PASSENGER_TEXT[_lang_of(user)].get(kind)
+    if not texts:
+        return False
+    fmt = {"p": ride.pickup_text, "d": ride.dropoff_text, **extra}
+    try:
+        send_expo_push([{
+            "to": user.push_token,
+            "sound": "default",
+            "title": texts[0],
+            "body": texts[1].format(**fmt),
+            "data": {"ride_id": str(ride.id), "type": f"ride_{kind}"},
+        }])
+        return True
+    except Exception as exc:
+        log.warning("user push failed: %s", exc)
+        return False
+
+
 def notify_drivers_of_new_ride(db, ride) -> dict:
     """新订单 → 推送给所有在线且有 push_token 的司机。返回统计，不抛异常。"""
     from .models import Driver, User  # 避免循环导入
