@@ -24,12 +24,19 @@ private-ride/
 - Account page: edit nickname, language preference, sign out (revokes token), delete account
 - Bilingual push (Expo) and email notifications follow each user's language
 
+## Install on a phone
+
+- **Web app (no store needed):** open https://ride.haocoach.com on the phone → iPhone: Share → Add to Home Screen; Android: tap "Install app". Works offline-tolerant via a service worker.
+- **Native app:** see [mobile/README.md](mobile/README.md) (Expo / EAS builds; Android APK is free to share).
+
 ## Quick start (backend)
 
 ```bash
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env   # defaults to local SQLite; set DEV_MODE=0 in production
+# APP_TZ=America/Los_Angeles  (time zone used in push/email text)
+# REMIND_LOOP=1               (scheduled-ride reminders run inside the server every 5 min)
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
