@@ -197,7 +197,7 @@ def test_delay只允许30_60_120(client):
         r = client.post(f"/rides/{rid}/delay",
                         json={"minutes": minutes}, headers=_auth(tok))
         assert r.status_code == 200, r.text
-        got = datetime.fromisoformat(r.json()["scheduled_at"])
+        got = datetime.fromisoformat(r.json()["scheduled_at"]).astimezone(timezone.utc).replace(tzinfo=None)
         assert abs((got - (base + timedelta(minutes=minutes))).total_seconds()) < 5
 
         # 库里的时间也确实用的是延后后的时间
@@ -240,7 +240,7 @@ def test_delay可累加(client):
     r = client.post(f"/rides/{rid}/delay",
                     json={"minutes": 60}, headers=_auth(tok))
     assert r.status_code == 200
-    got = datetime.fromisoformat(r.json()["scheduled_at"])
+    got = datetime.fromisoformat(r.json()["scheduled_at"]).astimezone(timezone.utc).replace(tzinfo=None)
     assert abs((got - (base + timedelta(minutes=90))).total_seconds()) < 5
 
 

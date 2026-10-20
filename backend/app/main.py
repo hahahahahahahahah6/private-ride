@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from . import auth
 from .auth import get_current_user, require_driver
 from .database import get_db, init_db
+from .timeutil import fmt_local, to_db
 from .models import AuthToken, Driver, InviteCode, PassengerNote, Ride, SavedPlace, ShareToken, User
 from .schemas import (
     RATING_TAGS,
@@ -54,10 +55,41 @@ from .schemas import (
 )
 
 
+async def _remind_loop() -> None:
+    """每 5 分钟扫一次预约单发提醒。以前 remind.py 只能靠 cron 跑，
+    但部署里没配 cron，提醒其实从没发出去过；现在后端自己跑。"""
+    import asyncio
+
+    from . import remind
+    from .database import SessionLocal
+
+    def _once() -> None:
+        db = SessionLocal()
+        try:
+            remind.sweep(db)
+        finally:
+            db.close()
+
+    while True:
+        try:
+            await asyncio.to_thread(_once)
+        except Exception:
+            log.warning("remind sweep failed", exc_info=True)
+        await asyncio.sleep(300)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    import os
+
     init_db()
+    task = None
+    if os.getenv("REMIND_LOOP", "1") == "1":
+        task = asyncio.create_task(_remind_loop())
     yield
+    if task is not None:
+        task.cancel()
 
 
 app = FastAPI(title="private-ride API", version="0.1.0", lifespan=lifespan)
@@ -360,8 +392,66 @@ def _notes_map(db: Session, driver_id: uuid.UUID, rides: list[Ride]) -> dict:
     }
 
 
+def _notify_passenger(db: Session, ride: Ride, kind: str, **extra) -> None:
+    """订单状态变了就告诉乘客：App 推送 + 邮件。任何失败都不影响主流程。"""
+    try:
+        passenger = db.get(User, ride.passenger_id) if ride.passenger_id else None
+        if passenger is None:
+            return
+        try:
+            from . import push as push_mod
+            push_mod.notify_user(passenger, kind, ride, **extra)
+        except Exception:
+            log.warning("passenger push failed for ride %s", ride.id, exc_info=True)
+        try:
+            from . import notify as notify_mod
+            notify_mod.notify_status_change(
+                passenger.email, kind, ride.pickup_text, ride.dropoff_text,
+                passenger.lang or "zh")
+        except Exception:
+            log.warning("passenger email failed for ride %s", ride.id, exc_info=True)
+    except Exception:
+        log.warning("notify passenger failed for ride %s", ride.id, exc_info=True)
+
+
+def _notify_passenger_push_only(db: Session, ride: Ride, kind: str, **extra) -> None:
+    try:
+        from . import push as push_mod
+        passenger = db.get(User, ride.passenger_id) if ride.passenger_id else None
+        push_mod.notify_user(passenger, kind, ride, **extra)
+    except Exception:
+        log.warning("passenger push failed for ride %s", ride.id, exc_info=True)
+
+
+def _push_driver(db: Session, ride: Ride, zh: tuple[str, str], en: tuple[str, str]) -> None:
+    """给这单的接单司机发一条推送。失败只记日志。"""
+    try:
+        from . import push as push_mod
+
+        driver = db.get(User, ride.driver_id) if ride.driver_id else None
+        token = getattr(driver, "push_token", None)
+        if not (token and push_mod.is_expo_push_token(token)):
+            return
+        title, body = en if getattr(driver, "lang", "zh") == "en" else zh
+        push_mod.send_expo_push([{
+            "to": token, "sound": "default", "title": title, "body": body,
+            "data": {"ride_id": str(ride.id)},
+        }])
+    except Exception:
+        log.warning("driver push failed for ride %s", ride.id, exc_info=True)
+
+
 def _notify_new_ride_bg(ride_id: uuid.UUID) -> None:
-    """后台发新订单通知（Expo push + 邮件），用独立 session，不阻塞下单响应。"""
+    """后台发新订单通知（Expo push + 邮件），用独立 session，不阻塞下单响应。
+
+    整个函数兜底 try：后台任务里抛异常没人接，宁可少发一条通知也别炸。"""
+    try:
+        _notify_new_ride_inner(ride_id)
+    except Exception:
+        log.warning("bg notify failed for ride %s", ride_id, exc_info=True)
+
+
+def _notify_new_ride_inner(ride_id: uuid.UUID) -> None:
     from .database import SessionLocal
 
     db = SessionLocal()
@@ -390,6 +480,17 @@ def _notify_new_ride_bg(ride_id: uuid.UUID) -> None:
         db.close()
 
 
+def _check_pay_mode(pay_mode: str, user: User) -> None:
+    """线上付款必须先绑卡，否则行程结束扣不到钱、司机白跑。"""
+    if pay_mode != "online":
+        return
+    from . import stripe_pay as sp
+    if not sp._configured():
+        raise HTTPException(status_code=400, detail="线上付款暂未开通，请选当面付")
+    if not user.stripe_pm_id:
+        raise HTTPException(status_code=400, detail="请先在账户页绑定银行卡，或选择当面付")
+
+
 @app.post("/rides", response_model=RideOut, status_code=201)
 def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
                 user: User = Depends(get_current_user),
@@ -413,6 +514,12 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
         # 包车单：行程结束时按实际小时数结算，final 先空着
         final_cents = None
     # quote 模式：等司机报价，final 先空着
+    _check_pay_mode(payload.pay_mode, user)
+    scheduled_at = to_db(payload.scheduled_at)
+    if scheduled_at is not None and scheduled_at < datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10):
+        raise HTTPException(status_code=400, detail="预约时间已经过去了，请重新选择")
+    if not payload.pickup_text.strip() or not payload.dropoff_text.strip():
+        raise HTTPException(status_code=400, detail="请填写上车和下车地点")
     stops = [s.strip() for s in (payload.stops or []) if s.strip()][:3]
     # 航班号：去所有空格、转大写，存起来（机场接送用）
     flight_no = "".join((payload.flight_no or "").split()).upper()[:16]
@@ -423,7 +530,7 @@ def create_ride(payload: RideCreate, background_tasks: BackgroundTasks,
         seats_needed=payload.seats_needed,
         note=payload.note,
         flight_no=flight_no,
-        scheduled_at=payload.scheduled_at,
+        scheduled_at=scheduled_at,
         price_mode=payload.price_mode,
         price_offer_cents=offer_cents,
         price_miles=miles,
@@ -605,7 +712,8 @@ def drivers_status(user: User = Depends(get_current_user),
     for d in drivers:
         prof = profs.get(d.id)
         out.append(DriverStatusOut(
-            name=d.name or d.phone,
+            # 没填昵称就显示“司机”，不把手机号暴露给所有乘客
+            name=d.name or "司机",
             vehicle_model=prof.vehicle_model if prof else "",
             is_active=(prof.is_active == 1) if prof else True,
         ))
@@ -617,7 +725,6 @@ def my_earnings(days: int = Query(default=30, ge=1, le=365),
                 driver: User = Depends(require_driver),
                 db: Session = Depends(get_db)) -> EarningsOut:
     """司机收入统计：近 N 天已完成订单的车费 + 小费。"""
-    from sqlalchemy import func
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rides = (
@@ -851,7 +958,7 @@ def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
             if delta < 90 * 60:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"时间冲突：您已接了 {o.scheduled_at.strftime('%m-%d %H:%M')} 的单（{o.pickup_text}→{o.dropoff_text}）",
+                    detail=f"时间冲突：您已接了 {fmt_local(o.scheduled_at)} 的单（{o.pickup_text}→{o.dropoff_text}）",
                 )
     else:
         busy = [o for o in others if o.status in ("en_route", "arrived", "in_progress")]
@@ -873,16 +980,8 @@ def accept_ride(ride_id: uuid.UUID, driver: User = Depends(require_driver),
     # bulk update 不经过 ORM，identity map 里的是旧值，必须 refresh
     ride = db.get(Ride, ride_id)
     db.refresh(ride)
-    # 邮件通知乘客：失败不影响接单
-    try:
-        from . import notify as notify_mod
-        passenger = db.get(User, ride.passenger_id)
-        notify_mod.notify_status_change(
-            passenger.email if passenger else None,
-            "accepted", ride.pickup_text, ride.dropoff_text,
-            passenger.lang if passenger else "zh")
-    except Exception:
-        pass
+    # 通知乘客（推送 + 邮件）：失败不影响接单
+    _notify_passenger(db, ride, "accepted")
     return _ride_out(ride, db, driver)
 
 
@@ -898,12 +997,15 @@ def quote_ride(ride_id: uuid.UUID, payload: QuoteIn,
         raise HTTPException(status_code=403, detail="只能操作自己的订单")
     if ride.price_mode != "quote":
         raise HTTPException(status_code=400, detail="该订单不是司机报价模式")
-    if ride.status not in ("accepted", "en_route"):
+    if ride.status not in ("accepted", "en_route", "arrived"):
         raise HTTPException(status_code=400, detail="当前状态不能报价")
+    if ride.price_status == "agreed":
+        raise HTTPException(status_code=400, detail="乘客已确认过价格，不能再改报价")
     ride.price_quote_cents = payload.price_quote_cents
     ride.price_status = "pending"
     db.commit()
     db.refresh(ride)
+    _notify_passenger_push_only(db, ride, "quoted", price=f"${payload.price_quote_cents / 100:.2f}")
     # 邮件通知乘客去确认报价
     try:
         from . import notify as notify_mod
@@ -923,6 +1025,7 @@ def quote_ride(ride_id: uuid.UUID, payload: QuoteIn,
 
 @app.post("/rides/{ride_id}/quote/confirm", response_model=RideOut)
 def confirm_quote(ride_id: uuid.UUID, payload: QuoteConfirmIn,
+                  background_tasks: BackgroundTasks,
                   user: User = Depends(get_current_user),
                   db: Session = Depends(get_db)) -> Ride:
     """乘客确认/拒绝司机报价。拒绝后订单回到待接单，司机可重新报价。"""
@@ -946,6 +1049,9 @@ def confirm_quote(ride_id: uuid.UUID, payload: QuoteConfirmIn,
         ride.status = "requested"
     db.commit()
     db.refresh(ride)
+    if not payload.accept:
+        # 订单回到待接单池，重新提醒在线司机
+        background_tasks.add_task(_notify_new_ride_bg, ride.id)
     return _ride_out(ride, db, user)
 
 
@@ -1025,7 +1131,7 @@ def delay_ride(ride_id: uuid.UUID, payload: DelayIn,
         if token and push_mod.is_expo_push_token(token):
             en = getattr(driver, "lang", "zh") == "en"
             mins = payload.minutes
-            new_time = ride.scheduled_at.strftime("%m-%d %H:%M")
+            new_time = fmt_local(ride.scheduled_at)
             flight = f"（{ride.flight_no}）" if ride.flight_no else ""
             title = "乘客航班晚点" if not en else "Flight delayed"
             body = (
@@ -1100,16 +1206,7 @@ def _after_ride_completed(ride: Ride, db: Session) -> None:
         _try_charge_ride(db, ride)
     except Exception:
         pass
-    # 邮件通知乘客：失败不影响状态流转
-    try:
-        from . import notify as notify_mod
-        passenger = db.get(User, ride.passenger_id)
-        notify_mod.notify_status_change(
-            passenger.email if passenger else None,
-            "completed", ride.pickup_text, ride.dropoff_text,
-            passenger.lang if passenger else "zh")
-    except Exception:
-        pass
+    _notify_passenger(db, ride, "completed")
 
 
 @app.post("/rides/{ride_id}/finish-hourly", response_model=RideOut)
@@ -1158,6 +1255,10 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
             status_code=400,
             detail=f"不能从 {ride.status} 直接到 {payload.status}",
         )
+    # 司机报价单：乘客没确认价格前不能开始行程，免得到了才发现价格谈不拢
+    if (ride.price_mode == "quote" and ride.price_status != "agreed"
+            and payload.status in ("in_progress", "completed")):
+        raise HTTPException(status_code=400, detail="乘客还没确认报价，请先报价并等乘客确认")
     # 包车单必须走 finish-hourly 填实际小时数结算，不能直接切完成
     if payload.status == "completed" and ride.price_mode == "hourly":
         raise HTTPException(status_code=400, detail="包车订单请填写实际小时数结算")
@@ -1184,21 +1285,14 @@ def advance_status(ride_id: uuid.UUID, payload: RideStatusIn,
     if payload.status == "completed":
         _after_ride_completed(ride, db)
         return _ride_out(ride, db, driver)
-    # 邮件通知乘客：失败不影响状态流转
-    try:
-        from . import notify as notify_mod
-        passenger = db.get(User, ride.passenger_id)
-        notify_mod.notify_status_change(
-            passenger.email if passenger else None,
-            payload.status, ride.pickup_text, ride.dropoff_text,
-            passenger.lang if passenger else "zh")
-    except Exception:
-        pass
+    # 通知乘客（推送 + 邮件）：失败不影响状态流转
+    _notify_passenger(db, ride, payload.status)
     return _ride_out(ride, db, driver)
 
 
 @app.post("/rides/{ride_id}/cancel", response_model=RideOut)
-def cancel_ride(ride_id: uuid.UUID, user: User = Depends(get_current_user),
+def cancel_ride(ride_id: uuid.UUID, background_tasks: BackgroundTasks,
+                user: User = Depends(get_current_user),
                 db: Session = Depends(get_db)) -> Ride:
     ride = db.get(Ride, ride_id)
     if ride is None:
@@ -1209,19 +1303,30 @@ def cancel_ride(ride_id: uuid.UUID, user: User = Depends(get_current_user),
         raise HTTPException(status_code=403, detail="无权取消此订单")
     if ride.status not in ("requested", "accepted", "en_route", "arrived"):
         raise HTTPException(status_code=400, detail=f"{ride.status} 状态不可取消")
+    if is_driver and not is_owner:
+        # 司机临时去不了：不是把乘客的单直接取消掉，而是退回待接单池，
+        # 让其他司机还能接，乘客不用重新下单
+        ride.status = "requested"
+        ride.driver_id = None
+        if ride.price_mode == "quote":
+            ride.price_quote_cents = None
+            ride.price_final_cents = None
+            ride.price_status = "pending"
+        db.commit()
+        db.refresh(ride)
+        _notify_passenger(db, ride, "released")
+        background_tasks.add_task(_notify_new_ride_bg, ride.id)
+        return _ride_out(ride, db, user)
+    had_driver = ride.driver_id is not None
     ride.status = "cancelled"
     db.commit()
     db.refresh(ride)
-    # 邮件通知乘客：失败不影响取消
-    try:
-        from . import notify as notify_mod
-        passenger = db.get(User, ride.passenger_id)
-        notify_mod.notify_status_change(
-            passenger.email if passenger else None,
-            "cancelled", ride.pickup_text, ride.dropoff_text,
-            passenger.lang if passenger else "zh")
-    except Exception:
-        pass
+    if had_driver and is_owner:
+        # 乘客取消已接的单：告诉司机别跑空
+        _push_driver(db, ride,
+                     ("订单已取消", f"乘客取消了订单：{ride.pickup_text} → {ride.dropoff_text}"),
+                     ("Ride cancelled", f"Passenger cancelled: {ride.pickup_text} → {ride.dropoff_text}"))
+    _notify_passenger(db, ride, "cancelled")
     return _ride_out(ride, db, user)
 
 
@@ -1245,6 +1350,7 @@ def rebook_ride(ride_id: uuid.UUID, background_tasks: BackgroundTasks,
         raise HTTPException(status_code=403, detail="只能复购自己下的订单")
     if old.status not in ("completed", "cancelled"):
         raise HTTPException(status_code=400, detail="只有已完成或已取消的订单可以再来一单")
+    _check_pay_mode(old.pay_mode, user)
     # 初始成交价与下单逻辑一致：出价模式直接用出价，里程模式按里程算；
     # quote 模式等司机重新报价，final 先空着
     offer_cents = old.price_offer_cents

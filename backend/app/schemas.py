@@ -2,9 +2,25 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Annotated
+
+from pydantic import AfterValidator
 
 from pydantic import BaseModel, Field
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """统一成带时区的 UTC 时间。
+
+    SQLite 存的是不带时区的 UTC；不处理的话 JSON 里没有 "Z"，
+    浏览器 new Date() 会当成本地时间，预约时间会差好几个小时。"""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+UTCDateTime = Annotated[datetime, AfterValidator(_as_utc)]
 
 
 # ---------- users ----------
@@ -86,7 +102,7 @@ class LocationIn(BaseModel):
 class DriverLocationOut(BaseModel):
     lat: float
     lng: float
-    updated_at: datetime
+    updated_at: UTCDateTime
 
 
 # ---------- rides ----------
@@ -115,7 +131,7 @@ class RideCreate(BaseModel):
     note: str = Field(default="", max_length=1000)
     # 航班号（可选）：机场接送用，如 "UA 857"，入库时去空格转大写
     flight_no: str = Field(default="", max_length=16)
-    scheduled_at: datetime | None = None
+    scheduled_at: UTCDateTime | None = None
     # 多经停：最多 3 个
     stops: list[str] = Field(default_factory=list, max_length=3)
     # 代叫车：帮家人/朋友叫车
@@ -183,8 +199,8 @@ class RideOut(BaseModel):
     # 航班号：机场接送用
     flight_no: str = ""
     status: str
-    scheduled_at: datetime | None
-    created_at: datetime
+    scheduled_at: UTCDateTime | None
+    created_at: UTCDateTime
     # 乘客联系方式：仅乘客本人、接单司机、管理员可见
     passenger_contact: str | None = None
     # 司机车辆：仅该单乘客、司机本人、管理员可见（进行中订单）
@@ -246,14 +262,14 @@ class NoteOut(BaseModel):
     passenger_id: uuid.UUID
     passenger_name: str
     note: str
-    updated_at: datetime
+    updated_at: UTCDateTime
 
 
 # ---------- 行程分享 ----------
 
 class ShareOut(BaseModel):
     url: str
-    expires_at: datetime
+    expires_at: UTCDateTime
 
 
 class SharedRideOut(BaseModel):
@@ -262,12 +278,12 @@ class SharedRideOut(BaseModel):
     pickup_text: str
     dropoff_text: str
     stops: list[str] = Field(default_factory=list)
-    scheduled_at: datetime | None
+    scheduled_at: UTCDateTime | None
     vehicle_model: str = ""
     plate: str = ""
     driver_lat: float | None = None
     driver_lng: float | None = None
-    location_updated_at: datetime | None = None
+    location_updated_at: UTCDateTime | None = None
 
 
 # ---------- 司机状态 / 收入 ----------

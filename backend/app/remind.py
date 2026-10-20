@@ -11,12 +11,9 @@ REMIND_BEFORE_MIN = 40
 
 
 def _fmt_time(dt) -> str:
-    if dt is None:
-        return ""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    local = dt.astimezone()
-    return local.strftime("%m-%d %H:%M")
+    # 服务器跑在 UTC，必须转成本地时区，不然提醒里的时间差好几个小时
+    from .timeutil import fmt_local
+    return fmt_local(dt)
 
 
 def sweep(db) -> dict:
@@ -25,7 +22,8 @@ def sweep(db) -> dict:
     from . import push as push_mod
     from . import notify as notify_mod
 
-    now = datetime.now(timezone.utc)
+    # 库里存的是不带时区的 UTC，比较也用不带时区的
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     deadline = now + timedelta(minutes=REMIND_BEFORE_MIN)
     # SQLite 存的 naive UTC；保险起见同时按 naive 比
     rides = (
@@ -47,13 +45,16 @@ def sweep(db) -> dict:
                 drv = db.get(User, ride.driver_id)
                 tokens = [drv.push_token] if drv and drv.push_token else []
             else:
+                from .models import Driver
                 drivers = (
                     db.query(User)
                     .filter(User.role.in_(("driver", "admin")),
                             User.push_token.isnot(None))
                     .all()
                 )
-                tokens = [d.push_token for d in drivers]
+                # 休息中的司机不打扰
+                resting = {d.user_id for d in db.query(Driver).filter(Driver.is_active == 0).all()}
+                tokens = [d.push_token for d in drivers if d.id not in resting]
             tokens = [t for t in tokens if push_mod.is_expo_push_token(t)]
             if tokens:
                 push_mod.send_expo_push([{
@@ -63,12 +64,22 @@ def sweep(db) -> dict:
                     "sound": "default",
                 } for t in tokens])
             # 提醒乘客：发邮件
-            pax = db.get(User, ride.passenger_id)
+            pax = db.get(User, ride.passenger_id) if ride.passenger_id else None
+            if pax and pax.push_token and push_mod.is_expo_push_token(pax.push_token):
+                try:
+                    push_mod.send_expo_push([{
+                        "to": pax.push_token,
+                        "title": "⏰ 行程快开始了",
+                        "body": f"{text}" + ("，司机已接单" if ride.driver_id else "，司机暂未接单"),
+                        "sound": "default",
+                    }])
+                except Exception:
+                    log.warning("passenger remind push failed", exc_info=True)
             if pax and pax.email:
                 notify_mod._send(
                     pax.email, "预约行程提醒",
                     f"您预约的行程（{when}）即将开始：{ride.pickup_text} → {ride.dropoff_text}。"
-                    + (f" 司机已接单。" if ride.driver_id else " 司机暂未接单，请留意。"),
+                    + (" 司机已接单。" if ride.driver_id else " 司机暂未接单，请留意。"),
                 )
             ride.reminder_sent = 1
             reminded += 1

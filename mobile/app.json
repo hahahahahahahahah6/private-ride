@@ -1,26 +1,53 @@
 {
   "expo": {
-    "android": {
-      "package": "com.haocoach.privateride"
-    },
-    "experiments": {
-      "typedRoutes": false
+    "name": "私人专车",
+    "slug": "private-ride",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0e0e0e",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0e0e0e"
     },
     "ios": {
       "bundleIdentifier": "com.haocoach.privateride",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "buildNumber": "2",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "接单后把你的位置分享给乘客，方便乘客知道你到哪了。 Your location is shared with the rider during a trip.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
-    "name": "私人专车",
-    "newArchEnabled": true,
-    "orientation": "portrait",
+    "android": {
+      "package": "com.haocoach.privateride",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0e0e0e"
+      },
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "POST_NOTIFICATIONS"]
+    },
     "plugins": [
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#f2ca50"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "接单后把你的位置分享给乘客。 Your location is shared with the rider during a trip."
+        }
+      ]
     ],
-    "slug": "private-ride",
-    "version": "0.1.0",
-    "notification": {
-      "icon": "./assets/icon.png",
-      "color": "#1a73e8"
+    "experiments": {
+      "typedRoutes": false
     }
   }
 }
